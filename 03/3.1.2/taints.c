@@ -46,16 +46,15 @@ static int __init my_init(void)
 	int j = 0;
 	struct list_head *modules;
 	struct module *m = THIS_MODULE;
+	struct module *tmp;
 	modules = &m->list;
 	printk(KERN_INFO "\n");
 	printk(KERN_INFO "%3d MOD:%20s, taints = %d\n", j++, m->name,
 	       m->taints);
-
-	/* COMPLETE ME
-	 *
-	 * traverse the rest of the list with list_for_each_entry()
-	 * and print value of each node
-	 */
+	
+	list_for_each_entry(tmp, modules, list) {
+		printk(KERN_INFO "taint = %d\n", tmp->taints);
+	}
 
 	return 0;
 }

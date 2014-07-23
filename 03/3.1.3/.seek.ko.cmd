@@ -1,0 +1,1 @@
+cmd_/home/pi/440/03/3.1.3/seek.ko := ld -EL -r  -T /home/pi/440/kernel/rpi-3.6.y/scripts/module-common.lds --build-id  -o /home/pi/440/03/3.1.3/seek.ko /home/pi/440/03/3.1.3/seek.o /home/pi/440/03/3.1.3/seek.mod.o

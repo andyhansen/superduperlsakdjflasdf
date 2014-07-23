@@ -107,9 +107,23 @@ mycdrv_write(struct file *file, const char __user * buf, size_t lbuf,
 static loff_t mycdrv_lseek(struct file *file, loff_t offset, int orig)
 {
 	loff_t testpos;
-
-	/* COMPLETE ME */
-
+	if (orig == SEEK_SET) {
+		testpos = offset;
+	} else if (orig == SEEK_CUR) {
+		testpos = file->f_pos + offset;
+	} else {
+		testpos = ramdisk_size - offset;
+	}
+	
+	if (testpos < 0) {
+		printk(KERN_INFO "Seek before file\n");
+		return -EINVAL;
+	} else if (testpos > ramdisk_size) {
+		printk(KERN_INFO "Seek before file\n");
+		return -EINVAL;
+	}
+	
+	file->f_pos = testpos;
 
 	printk(KERN_INFO "Seeking to pos=%ld\n", (long)testpos);
 	return testpos;
