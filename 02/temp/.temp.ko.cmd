@@ -1,0 +1,1 @@
+cmd_/home/pi/440/02/temp/temp.ko := ld -EL -r  -T /home/pi/440/kernel/rpi-3.6.y/scripts/module-common.lds --build-id  -o /home/pi/440/02/temp/temp.ko /home/pi/440/02/temp/temp.o /home/pi/440/02/temp/temp.mod.o
