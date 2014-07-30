@@ -18,11 +18,8 @@ static const struct modversion_info ____versions[]
 __used
 __attribute__((section("__versions"))) = {
 	{ 0xda9e78e9, "module_layout" },
-	{ 0xeed38436, "malloc_sizes" },
-	{ 0x37a0cba, "kfree" },
 	{ 0x74738f6d, "cdev_del" },
 	{ 0xe3321d40, "cdev_add" },
-	{ 0xd197d610, "kmem_cache_alloc" },
 	{ 0x60c2503e, "cdev_init" },
 	{ 0x7485e15e, "unregister_chrdev_region" },
 	{ 0x9d0d02cf, "cdev_alloc" },
@@ -30,9 +27,10 @@ __attribute__((section("__versions"))) = {
 	{ 0x67c2fa54, "__copy_to_user" },
 	{ 0xfbc74f64, "__copy_from_user" },
 	{ 0xfa2a45e, "__memzero" },
+	{ 0xeed38436, "malloc_sizes" },
+	{ 0xd197d610, "kmem_cache_alloc" },
 	{ 0xefd6cf06, "__aeabi_unwind_cpp_pr0" },
-	{ 0xf623f316, "module_refcount" },
-	{ 0x2e5810c6, "__aeabi_unwind_cpp_pr1" },
+	{ 0x37a0cba, "kfree" },
 	{ 0x27e1a049, "printk" },
 };
 
@@ -42,4 +40,4 @@ __attribute__((section(".modinfo"))) =
 "depends=";
 
 
-MODULE_INFO(srcversion, "5D845D655B7320432A4E0AF");
+MODULE_INFO(srcversion, "444DDF9F63AF95AECB3DAEB");

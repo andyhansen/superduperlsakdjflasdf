@@ -24,58 +24,44 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/mutex.h>
 #include <asm/atomic.h>
 #include <linux/errno.h>
+#include <linux/semaphore.h>
 
-extern struct mutex my_mutex;
+extern struct semaphore my_semaphore;
 
 static char *modname = __stringify(KBUILD_BASENAME);
 
 static int __init my_init(void)
 {
 	printk(KERN_INFO "Trying to load module %s\n", modname);
-	printk(KERN_INFO "\n%s start count=%d:\n", modname,
-	       atomic_read(&my_mutex.count));
+	/*printk(KERN_INFO "\n%s start count=%d:\n", modname,
+	       atomic_read(&my_semaphore.count));*/
 
-	/* START SKELETON */
 	/* COMPLETE ME */
-	/* lock my_mutex */
-	/* END SKELETON */
-	/* START TRIM */
-
-	/* MUTEX */
-	if (mutex_lock_interruptible(&my_mutex)) {
-		printk(KERN_INFO "mutex unlocked - wake up \n");
+	if (down_trylock(&my_semaphore)) {
+		printk(KERN_INFO "semaphore unlocked - wake up \n");
 		return -1;
 	}
-	/* END TRIM */
 
-	printk(KERN_INFO "\n%s mutex put mutex, count=%d:\n",
-	       modname, atomic_read(&my_mutex.count));
+	/*printk(KERN_INFO "\n%s semaphore put semaphore, count=%d:\n",
+	       modname, atomic_read(&my_semaphore.count));*/
 
 	return 0;
 }
 
 static void __exit my_exit(void)
 {
-	/* START SKELETON */
 	/* COMPLETE ME */
-	/* unlock my_mutex */
-	/* END SKELETON */
-	/* START TRIM */
+	up(&my_semaphore);
 
-	/* MUTEX */
-	mutex_unlock(&my_mutex);
-	/* END TRIM */
-
-	printk(KERN_INFO "\n%s mutex end count=%d:\n",
-	       modname, atomic_read(&my_mutex.count));
+	/*printk(KERN_INFO "\n%s semaphore end count=%d:\n",
+	       modname, atomic_read(&my_semaphore.count));*/
 }
 
 module_init(my_init);
 module_exit(my_exit);
 
 MODULE_AUTHOR("Tatsuo Kawasaki");
-MODULE_DESCRIPTION("LDD:1.0 s_12/lab1_mutex2.c");
+MODULE_DESCRIPTION("LDD:1.0 s_12/lab1_semaphore2.c");
 MODULE_LICENSE("GPL v2");

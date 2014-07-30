@@ -1,0 +1,1 @@
+cmd_/home/pi/440/03/3.2.1/wait_event.ko := ld -EL -r  -T /home/pi/440/kernel/rpi-3.6.y/scripts/module-common.lds --build-id  -o /home/pi/440/03/3.2.1/wait_event.ko /home/pi/440/03/3.2.1/wait_event.o /home/pi/440/03/3.2.1/wait_event.mod.o

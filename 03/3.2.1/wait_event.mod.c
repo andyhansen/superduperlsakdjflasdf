@@ -19,20 +19,22 @@ __used
 __attribute__((section("__versions"))) = {
 	{ 0xda9e78e9, "module_layout" },
 	{ 0xeed38436, "malloc_sizes" },
-	{ 0x37a0cba, "kfree" },
-	{ 0x74738f6d, "cdev_del" },
-	{ 0xe3321d40, "cdev_add" },
+	{ 0xdb7e82df, "misc_register" },
 	{ 0xd197d610, "kmem_cache_alloc" },
-	{ 0x60c2503e, "cdev_init" },
-	{ 0x7485e15e, "unregister_chrdev_region" },
-	{ 0x9d0d02cf, "cdev_alloc" },
-	{ 0xd8e484f0, "register_chrdev_region" },
+	{ 0x37a0cba, "kfree" },
+	{ 0xff58149e, "misc_deregister" },
+	{ 0xc8b57c27, "autoremove_wake_function" },
+	{ 0xc06ec2c8, "abort_exclusive_wait" },
 	{ 0x67c2fa54, "__copy_to_user" },
+	{ 0x8893fa5d, "finish_wait" },
+	{ 0xb77a7c47, "prepare_to_wait_exclusive" },
+	{ 0x1000e51, "schedule" },
 	{ 0xfbc74f64, "__copy_from_user" },
 	{ 0xfa2a45e, "__memzero" },
+	{ 0xb9e52429, "__wake_up" },
+	{ 0x2e5810c6, "__aeabi_unwind_cpp_pr1" },
 	{ 0xefd6cf06, "__aeabi_unwind_cpp_pr0" },
 	{ 0xf623f316, "module_refcount" },
-	{ 0x2e5810c6, "__aeabi_unwind_cpp_pr1" },
 	{ 0x27e1a049, "printk" },
 };
 
@@ -42,4 +44,4 @@ __attribute__((section(".modinfo"))) =
 "depends=";
 
 
-MODULE_INFO(srcversion, "5D845D655B7320432A4E0AF");
+MODULE_INFO(srcversion, "4CFF0CFF3044D8D8758F969");

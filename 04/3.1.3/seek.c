@@ -46,11 +46,12 @@ static dev_t first;
 static unsigned int count = 1;
 static int my_major = 700, my_minor = 0;
 static struct cdev *my_cdev;
-static size_t file_size = 0;
+//static void *private_data;
 
 static int mycdrv_open(struct inode *inode, struct file *file)
 {
 	static int counter = 0;
+	file->private_data = kmalloc(ramdisk_size, GFP_KERNEL);
 	printk(KERN_INFO " attempting to open device: %s:\n", MYDEV_NAME);
 	printk(KERN_INFO " MAJOR number = %d, MINOR number = %d\n",
 	       imajor(inode), iminor(inode));
@@ -59,7 +60,7 @@ static int mycdrv_open(struct inode *inode, struct file *file)
 	printk(KERN_INFO " successfully open  device: %s:\n\n", MYDEV_NAME);
 	printk(KERN_INFO "I have been opened  %d times since being loaded\n",
 	       counter);
-	printk(KERN_INFO "ref=%d\n", module_refcount(THIS_MODULE));
+	//printk(KERN_INFO "ref=%d\n", module_refcount(THIS_MODULE));
 
 	/* turn this on to inhibit seeking */
 	/* file->f_mode = file->f_mode & ~FMODE_LSEEK; */
@@ -70,6 +71,7 @@ static int mycdrv_open(struct inode *inode, struct file *file)
 static int mycdrv_release(struct inode *inode, struct file *file)
 {
 	printk(KERN_INFO " CLOSING device: %s:\n\n", MYDEV_NAME);
+	kfree(file->private_data);
 	return 0;
 }
 
@@ -81,7 +83,7 @@ mycdrv_read(struct file *file, char __user * buf, size_t lbuf, loff_t * ppos)
 	bytes_to_do = maxbytes > lbuf ? lbuf : maxbytes;
 	if (bytes_to_do == 0)
 		printk(KERN_INFO "Reached end of the device on a read");
-	nbytes = bytes_to_do - copy_to_user(buf, ramdisk + *ppos, bytes_to_do);
+	nbytes = bytes_to_do - copy_to_user(buf, file->private_data + *ppos, bytes_to_do);
 	*ppos += nbytes;
 	printk(KERN_INFO "\n Leaving the   READ function, nbytes=%d, pos=%d\n",
 	       nbytes, (int)*ppos);
@@ -98,7 +100,7 @@ mycdrv_write(struct file *file, const char __user * buf, size_t lbuf,
 	if (bytes_to_do == 0)
 		printk(KERN_INFO "Reached end of the device on a write");
 	nbytes =
-	    bytes_to_do - copy_from_user(ramdisk + *ppos, buf, bytes_to_do);
+	    bytes_to_do - copy_from_user(file->private_data + *ppos, buf, bytes_to_do);
 	*ppos += nbytes;
 	printk(KERN_INFO "\n Leaving the   WRITE function, nbytes=%d, pos=%d\n",
 	       nbytes, (int)*ppos);
@@ -155,13 +157,13 @@ static int __init my_init(void)
 		return -1;
 	}
 	cdev_init(my_cdev, &mycdrv_fops);
-	ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
+	/*ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);*/
 
 	if (cdev_add(my_cdev, first, count) < 0) {
 		printk(KERN_ERR "cdev_add() failed\n");
 		cdev_del(my_cdev);
 		unregister_chrdev_region(first, count);
-		kfree(ramdisk);
+		/*kfree(ramdisk);*/
 		return -1;
 	}
 

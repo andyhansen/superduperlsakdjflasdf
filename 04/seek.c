@@ -55,6 +55,8 @@ static int mycdrv_open(struct inode *inode, struct file *file)
 	printk(KERN_INFO " MAJOR number = %d, MINOR number = %d\n",
 	       imajor(inode), iminor(inode));
 	counter++;
+	
+	
 
 	printk(KERN_INFO " successfully open  device: %s:\n\n", MYDEV_NAME);
 	printk(KERN_INFO "I have been opened  %d times since being loaded\n",
