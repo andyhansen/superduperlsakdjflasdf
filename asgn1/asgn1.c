@@ -61,6 +61,8 @@ typedef struct asgn1_dev_t {
 
 asgn1_dev asgn1_device;
 
+static struct proc_dir_entry *proc_entry;
+
 
 int asgn1_major = 0;                      /* major number of module */  
 int asgn1_minor = 0;                      /* minor number of module */
@@ -72,6 +74,8 @@ int asgn1_dev_count = 1;                  /* number of devices */
  */
 void free_memory_pages(void) {
   page_node *curr;
+  struct list_head *ptr;
+  struct list_head *tmp;
 
   /* COMPLETE ME */
   /**
@@ -84,6 +88,14 @@ void free_memory_pages(void) {
    * }
    * reset device data size, and num_pages
    */  
+
+  /*list_for_each_safe(ptr, tmp, &asgn1_device.mem_list) {
+    curr = list_entry(ptr, struct page_node, list);
+    kfree(curr->page);
+    list_del(&curr->list);
+    kfree(curr);
+  }*/
+  /* TODO: reset device data size, and num_pages */
 }
 
 
@@ -99,9 +111,15 @@ int asgn1_open(struct inode *inode, struct file *filp) {
    * if opened in write-only mode, free all memory pages
    *
    */
-   
+  atomic_inc(&asgn1_device.nprocs);
+  if (atomic_read(&asgn1_device.nprocs) >
+                      atomic_read(&asgn1_device.max_nprocs)) {
+      atomic_dec(&asgn1_device.nprocs);
+      printk(KERN_WARNING "too many processes\n");
+      return -EBUSY;
+  }
 
-
+  if (filp->f_flags = O_WRONLY) free_memory_pages();
   return 0; /* success */
 }
 
@@ -115,6 +133,7 @@ int asgn1_release (struct inode *inode, struct file *filp) {
   /**
    * decrement process count
    */
+  atomic_dec(&asgn1_device.nprocs);
   return 0;
 }
 
@@ -309,9 +328,32 @@ int __init asgn1_init_module(void){
    * create proc entries
    */
 
-  asgn1_device.nprocs = 1;
-  asgn1_device.max_nproc = 5;
- 
+  /* TODO: Remember to add error checking */
+  atomic_set(&asgn1_device.nprocs, 0);
+  atomic_set(&asgn1_device.max_nprocs, 5);
+  result = alloc_chrdev_region(&asgn1_device.dev, asgn1_minor,
+                                       asgn1_dev_count, MYDEV_NAME);
+  /* TODO: slide 6 lec 4 get the major number */
+  if (result < 0) {
+    printk(KERN_WARNING "%s: couldn't get a major number\n", MYDEV_NAME);
+    /* TODO: Get the right return code */
+    goto fail_device;
+  }
+
+  asgn1_device.cdev = cdev_alloc();
+  cdev_init(asgn1_device.cdev, &asgn1_fops);
+  cdev_add(asgn1_device.cdev, asgn1_minor, asgn1_dev_count);
+
+  INIT_LIST_HEAD(&asgn1_device.mem_list);
+
+  /* TODO: make sure this is the right thing work out where to put fops*/
+  /*proc_entry = create_proc_entry("proc_entry", S_IRUGO | S_IWUSR, NULL, &asgn1_fops);
+  if (!proc_entry) {
+    printk(KERN_WARNING "%s: failed making the proc\n", "proc_entry");
+    result = -1;
+    goto fail_device;
+  }*/
+
   asgn1_device.class = class_create(THIS_MODULE, MYDEV_NAME);
   if (IS_ERR(asgn1_device.class)) {
   }
@@ -334,6 +376,15 @@ fail_device:
 
   /* COMPLETE ME */
   /* PLEASE PUT YOUR CLEANUP CODE HERE, IN REVERSE ORDER OF ALLOCATION */
+
+   /* remove the proc*/
+   /* list head */
+   /* unregister device */
+   unregister_chrdev_region(asgn1_device.dev, asgn1_dev_count);
+   /* cdev */
+   cdev_del(asgn1_device.cdev);
+   /* */
+
 
   return result;
 }

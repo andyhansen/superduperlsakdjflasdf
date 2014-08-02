@@ -85,12 +85,23 @@ static int __init my_init(void)
 	 * register my_proc_read to my_proc->read_proc
 	 * register my_proc_write to my_proc->write_proc
 	 */
+	/* zhiyi such a cool guy! */
+	my_proc = create_proc_entry(NODE, 0, NULL);
+	if (!my_proc) {
+		printk(KERN_ERR "I failed to make %s\n", NODE);
+		return -1;
+	}
+	printk(KERN_INFO "I created %s\n", NODE);
+	my_proc->read_proc = my_proc_read;
+	my_proc->write_proc = my_proc_write;
 	return 0;
 }
 
 static void __exit my_exit(void)
 {
 	/* COMPLETE ME */
+	if (my_proc)
+		remove_proc_entry(NODE, NULL);	
 	/**
 	 * remove the proc entry
 	 */
