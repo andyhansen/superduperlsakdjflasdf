@@ -26,8 +26,7 @@ ssize_t my_fread(int fildes, void *buf, size_t nbyte) {
       if (read_size < 0) {
           if (EINTR == errno) {
               continue;
-          } else {
-              perror("read()");
+          } else { perror("read()");
               exit(EXIT_FAILURE);
           }
       } else if (0 == read_size) {

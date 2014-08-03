@@ -61,8 +61,8 @@ typedef struct asgn1_dev_t {
 
 asgn1_dev asgn1_device;
 
+/* Don't know if this is needed */
 static struct proc_dir_entry *proc_entry;
-
 
 int asgn1_major = 0;                      /* major number of module */  
 int asgn1_minor = 0;                      /* minor number of module */
@@ -89,13 +89,14 @@ void free_memory_pages(void) {
    * reset device data size, and num_pages
    */  
 
-  /*list_for_each_safe(ptr, tmp, &asgn1_device.mem_list) {
-    curr = list_entry(ptr, struct page_node, list);
+  list_for_each_safe(ptr, tmp, &asgn1_device.mem_list) {
+    curr = list_entry(ptr, page_node, list);
     kfree(curr->page);
     list_del(&curr->list);
     kfree(curr);
-  }*/
-  /* TODO: reset device data size, and num_pages */
+  }
+  asgn1_device.num_pages = 0;
+  asgn1_device.data_size = 0;
 }
 
 
@@ -111,6 +112,8 @@ int asgn1_open(struct inode *inode, struct file *filp) {
    * if opened in write-only mode, free all memory pages
    *
    */
+
+  /* Look at lecture 4 slide 16 for what to do here */
   atomic_inc(&asgn1_device.nprocs);
   if (atomic_read(&asgn1_device.nprocs) >
                       atomic_read(&asgn1_device.max_nprocs)) {
@@ -119,7 +122,8 @@ int asgn1_open(struct inode *inode, struct file *filp) {
       return -EBUSY;
   }
 
-  if (filp->f_flags = O_WRONLY) free_memory_pages();
+  /* If opened in write only mode then free all the pages */
+  if (filp->f_flags == O_WRONLY) free_memory_pages();
   return 0; /* success */
 }
 
@@ -144,7 +148,8 @@ int asgn1_release (struct inode *inode, struct file *filp) {
 ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 		 loff_t *f_pos) {
   size_t size_read = 0;     /* size read from virtual disk in this function */
-  size_t begin_offset;      /* the offset from the beginning of a page to
+  /* TODO: This might not be correct */
+  size_t begin_offset = *f_pos % PAGE_SIZE;      /* the offset from the beginning of a page to
 			       start reading */
   int begin_page_no = *f_pos / PAGE_SIZE; /* the first page which contains
 					     the requested data */
@@ -173,6 +178,16 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
    * if end of data area of ramdisk reached before copying the requested
    *   return the size copied to the user space so far
    */
+  /* Maybe should be just f_pos, not filp->f_pos */
+  if (filp->f_pos > asgn1_device.data_size) return 0;
+  /* Seek to the right starting page */
+  while (curr_page_no < begin_page_no) {
+    /* Move to the next page.. somehow */
+    /*ptr = ptr.next;*/
+    curr_page_no++;
+  }
+
+  size_to_be_read = count;
 
   return size_read;
 }
@@ -196,7 +211,24 @@ static loff_t asgn1_lseek (struct file *file, loff_t offset, int cmd)
      *
      * set file->f_pos to testpos
      */
+    /* Can change this to a switch statement */
+    if (cmd == SEEK_SET) {
+      testpos = offset;
+    } else if (cmd == SEEK_CUR) {
+      testpos = file->f_pos + offset;
+    } else if (cmd == SEEK_END) {
+      /* TODO: is this correct? */
+      testpos = buffer_size - offset;
+    } else {
+      printk(KERN_INFO "Wrong command given\n");
+      return -EINVAL;
+    }
+    
+    if (testpos < 0) testpos = 0;
+    else if (testpos > buffer_size) testpos = buffer_size;
+
     printk (KERN_INFO "Seeking to pos=%ld\n", (long)testpos);
+    file->f_pos = testpos;
     return testpos;
 }
 
@@ -333,17 +365,31 @@ int __init asgn1_init_module(void){
   atomic_set(&asgn1_device.max_nprocs, 5);
   result = alloc_chrdev_region(&asgn1_device.dev, asgn1_minor,
                                        asgn1_dev_count, MYDEV_NAME);
-  /* TODO: slide 6 lec 4 get the major number */
   if (result < 0) {
     printk(KERN_WARNING "%s: couldn't get a major number\n", MYDEV_NAME);
     /* TODO: Get the right return code */
     goto fail_device;
   }
 
-  asgn1_device.cdev = cdev_alloc();
-  cdev_init(asgn1_device.cdev, &asgn1_fops);
-  cdev_add(asgn1_device.cdev, asgn1_minor, asgn1_dev_count);
+  /* Set the major number variable*/
+  asgn1_major = MAJOR(asgn1_device.dev);
+  printk(KERN_INFO "%s: allocated the major number %d\n", MYDEV_NAME, asgn1_major);
 
+  /* Set up cdev internal structure */
+  asgn1_device.cdev = cdev_alloc();
+  asgn1_device.cdev->ops = &asgn1_fops;
+  /*cdev_init(asgn1_device.cdev, &asgn1_fops);*/
+  asgn1_device.cdev->owner = THIS_MODULE;
+
+  /* Register the device */
+  /* TODO: Handle a negative return code */
+  result = cdev_add(asgn1_device.cdev, asgn1_device.dev, asgn1_dev_count);
+  if (result < 0) {
+    printk(KERN_WARNING "%s: unable to add cdev\n", MYDEV_NAME);
+    goto fail_device;
+  }
+
+  /* Initialise the list head */
   INIT_LIST_HEAD(&asgn1_device.mem_list);
 
   /* TODO: make sure this is the right thing work out where to put fops*/
@@ -378,12 +424,11 @@ fail_device:
   /* PLEASE PUT YOUR CLEANUP CODE HERE, IN REVERSE ORDER OF ALLOCATION */
 
    /* remove the proc*/
-   /* list head */
+   /* remove list head */
+   /* de-register the device */
+   cdev_del(asgn1_device.cdev);
    /* unregister device */
    unregister_chrdev_region(asgn1_device.dev, asgn1_dev_count);
-   /* cdev */
-   cdev_del(asgn1_device.cdev);
-   /* */
 
 
   return result;
@@ -403,6 +448,11 @@ void __exit asgn1_exit_module(void){
    * free all pages in the page list 
    * cleanup in reverse order
    */
+
+  free_memory_pages();
+  cdev_del(asgn1_device.cdev);
+  /* unregister device */
+  unregister_chrdev_region(asgn1_device.dev, asgn1_dev_count);
   printk(KERN_WARNING "Good bye from %s\n", MYDEV_NAME);
 }
 
