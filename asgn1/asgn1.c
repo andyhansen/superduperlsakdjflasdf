@@ -148,8 +148,7 @@ int asgn1_release (struct inode *inode, struct file *filp) {
 ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 		 loff_t *f_pos) {
   size_t size_read = 0;     /* size read from virtual disk in this function */
-  /* TODO: This might not be correct */
-  size_t begin_offset = *f_pos % PAGE_SIZE;      /* the offset from the beginning of a page to
+  size_t begin_offset;      /* the offset from the beginning of a page to
 			       start reading */
   int begin_page_no = *f_pos / PAGE_SIZE; /* the first page which contains
 					     the requested data */
@@ -186,6 +185,8 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
     /*ptr = ptr.next;*/
     curr_page_no++;
   }
+
+
 
   size_to_be_read = count;
 
@@ -241,18 +242,21 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 		  loff_t *f_pos) {
   size_t orig_f_pos = *f_pos;  /* the original file position */
   size_t size_written = 0;  /* size written to virtual disk in this function */
-  size_t begin_offset;      /* the offset from the beginning of a page to
+  size_t begin_offset;  /* the offset from the beginning of a page to
 			       start writing */
   int begin_page_no = *f_pos / PAGE_SIZE;  /* the first page this finction
 					      should start writing to */
+  int final_page_no = (*f_pos + count) / PAGE_SIZE;
 
   int curr_page_no = 0;     /* the current page number */
   size_t curr_size_written; /* size written to virtual disk in this round */
   size_t size_to_be_written;  /* size to be read in the current round in 
 				 while loop */
+  size_t size_not_written;
   
   struct list_head *ptr = asgn1_device.mem_list.next;
   page_node *curr;
+
 
   /* COMPLETE ME */
   /**
@@ -263,10 +267,42 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
    *   a while loop / do-while loop is recommended to handle this situation. 
    */
 
+  /* allocate the page and add it all to the list */
+  while (asgn1_device.num_pages < final_page_no) {
+    curr = kmalloc(sizeof(page_node), GFP_KERNEL);
+    curr->page = alloc_pages(GFP_KERNEL, 0);
+    list_add(&curr->list, &asgn1_device.mem_list);
+    asgn1_device.num_pages++;
+  }
+
+  list_for_each(ptr, &asgn1_device.mem_list) {
+    curr = list_entry(ptr, page_node, list);
+    if (curr_page_no == begin_page_no) break;
+    curr_page_no++;
+  }
+
+  /* while there is still stuff to be written */
+  while (size_written < count) {
+    /* get the offset for the current page we are in */
+    begin_offset = *f_pos % PAGE_SIZE;
+    size_to_be_written = count;
+    if ((PAGE_SIZE - begin_offset) < size_to_be_written)
+            size_to_be_written = PAGE_SIZE - begin_offset;
+    size_not_written = copy_from_user(&curr->page[begin_offset],
+                                       &buf[size_written],
+                                       size_to_be_written);
+    curr_size_written = size_to_be_written - size_not_written;
+    *f_pos += curr_size_written;
+    size_written += curr_size_written;
+    if (size_not_written) break;
+    ptr = ptr->next;
+    curr = list_entry(ptr, page_node, list);
+  }
+
 
   asgn1_device.data_size = max(asgn1_device.data_size,
                                orig_f_pos + size_written);
-  return size_written;
+  return (size_written == count) ? size_written : -EFAULT;
 }
 
 #define SET_NPROC_OP 1
