@@ -89,9 +89,10 @@ void free_memory_pages(void) {
    * reset device data size, and num_pages
    */  
 
+  printk(KERN_INFO "%s: %d pages freed\n", MYDEV_NAME, asgn1_device.num_pages);
   list_for_each_safe(ptr, tmp, &asgn1_device.mem_list) {
     curr = list_entry(ptr, page_node, list);
-    kfree(curr->page);
+    __free_page(curr->page);
     list_del(&curr->list);
     kfree(curr);
   }
@@ -156,6 +157,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
   size_t curr_size_read;    /* size read from the virtual disk in this round */
   size_t size_to_be_read;   /* size to be read in the current round in 
 			       while loop */
+  size_t size_not_read;
 
   struct list_head *ptr = asgn1_device.mem_list.next;
   page_node *curr;
@@ -182,8 +184,19 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
   /* Seek to the right starting page */
   while (curr_page_no < begin_page_no) {
     /* Move to the next page.. somehow */
-    /*ptr = ptr.next;*/
+    ptr = ptr->next;
     curr_page_no++;
+  }
+  curr = list_entry(ptr, page_node, list);
+  if (curr->page == NULL) {
+    return -1;
+    /*oh no*/
+  }
+  while (size_read < count) {
+    begin_offset = *f_pos % PAGE_SIZE;
+    size_to_be_read = count - size_read;
+    if ((PAGE_SIZE - begin_offset) < size_to_be_read) 
+            size_to_be_read = PAGE_SIZE - begin_offset;
   }
 
 
@@ -268,28 +281,41 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
    */
 
   /* allocate the page and add it all to the list */
-  while (asgn1_device.num_pages < final_page_no) {
+  while (asgn1_device.num_pages < final_page_no+1) {
     curr = kmalloc(sizeof(page_node), GFP_KERNEL);
-    curr->page = alloc_pages(GFP_KERNEL, 0);
-    list_add(&curr->list, &asgn1_device.mem_list);
+    curr->page = alloc_page(GFP_KERNEL);
+    if (NULL == curr->page) {
+      printk(KERN_WARNING "Not enough memory left\n");
+      return size_written;
+    }
+    list_add_tail(&(curr->list), &asgn1_device.mem_list);
     asgn1_device.num_pages++;
+    /* TODO: why this? */
+    ptr = asgn1_device.mem_list.prev;
   }
+  printk(KERN_INFO "%s: %d pages total\n", MYDEV_NAME, asgn1_device.num_pages);
+  printk(KERN_INFO "%s: %d to be written\n", MYDEV_NAME, count);
 
   list_for_each(ptr, &asgn1_device.mem_list) {
-    curr = list_entry(ptr, page_node, list);
     if (curr_page_no == begin_page_no) break;
     curr_page_no++;
+  }
+  curr = list_entry(ptr, page_node, list);
+  if (curr->page == NULL) {
+    printk(KERN_INFO "%s: no page ready to be written to\n", MYDEV_NAME);
+    return -1;
   }
 
   /* while there is still stuff to be written */
   while (size_written < count) {
     /* get the offset for the current page we are in */
     begin_offset = *f_pos % PAGE_SIZE;
-    size_to_be_written = count;
+    size_to_be_written = count-size_written;
     if ((PAGE_SIZE - begin_offset) < size_to_be_written)
             size_to_be_written = PAGE_SIZE - begin_offset;
-    size_not_written = copy_from_user(&curr->page[begin_offset],
-                                       &buf[size_written],
+    printk(KERN_INFO "%s: writing %d bytes to page %d\n", MYDEV_NAME, size_to_be_written, curr_page_no);
+    size_not_written = copy_from_user(page_address(curr->page) + begin_offset,
+                                       buf + size_written,
                                        size_to_be_written);
     curr_size_written = size_to_be_written - size_not_written;
     *f_pos += curr_size_written;
@@ -297,12 +323,15 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
     if (size_not_written) break;
     ptr = ptr->next;
     curr = list_entry(ptr, page_node, list);
+    curr_page_no++;
   }
 
 
+  filp->f_pos = f_pos;
   asgn1_device.data_size = max(asgn1_device.data_size,
                                orig_f_pos + size_written);
-  return (size_written == count) ? size_written : -EFAULT;
+  printk(KERN_INFO "%s: %d bytes written\n", MYDEV_NAME, size_written);
+  return (size_written > 0) ? size_written : -EFAULT;
 }
 
 #define SET_NPROC_OP 1
