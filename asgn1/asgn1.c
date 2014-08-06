@@ -180,29 +180,46 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
    *   return the size copied to the user space so far
    */
   /* Maybe should be just f_pos, not filp->f_pos */
-  if (filp->f_pos > asgn1_device.data_size) return 0;
+  printk(KERN_INFO "Device wishes to read %d bytes", count);
+  if (*f_pos >= asgn1_device.data_size) return 0;
   /* Seek to the right starting page */
-  while (curr_page_no < begin_page_no) {
-    /* Move to the next page.. somehow */
+  /*while (curr_page_no < begin_page_no) {
     ptr = ptr->next;
+    curr_page_no++;
+  }*/
+  list_for_each(ptr, &asgn1_device.mem_list) {
+    if (curr_page_no == begin_page_no) break;
     curr_page_no++;
   }
   curr = list_entry(ptr, page_node, list);
-  if (curr->page == NULL) {
-    return -1;
-    /*oh no*/
-  }
-  while (size_read < count) {
+  printk(KERN_WARNING "reading %d bytes starting at page %d\n", count, curr_page_no);
+  printk(KERN_WARNING "data size is %d pointer is at %u\n", 
+                          asgn1_device.data_size, *f_pos);
+  while (size_read < asgn1_device.data_size) {
+    if (curr->page == NULL) {
+      return -1;
+      printk(KERN_WARNING "on a page that isn't allocated\n");
+    }
     begin_offset = *f_pos % PAGE_SIZE;
     size_to_be_read = count - size_read;
     if ((PAGE_SIZE - begin_offset) < size_to_be_read) 
             size_to_be_read = PAGE_SIZE - begin_offset;
+    printk(KERN_WARNING "offset %d\n", begin_offset);
+    printk(KERN_WARNING "attempting to read %d on page %d\n", size_to_be_read, curr_page_no);
+    size_not_read = copy_to_user(buf + size_read,
+                                 page_address(curr->page) + begin_offset,
+                                 size_to_be_read);
+    curr_size_read = size_to_be_read - size_not_read;
+    *f_pos += curr_size_read;
+    size_read += curr_size_read;
+    printk(KERN_WARNING "%d/%d bytes read\n", size_read, asgn1_device.data_size);
+    if (size_not_read) break;
+    ptr = ptr->next;
+    curr = list_entry(ptr, page_node, list);
+    curr_page_no++;
   }
-
-
-
-  size_to_be_read = count;
-
+  /*filp->f_pos = *f_pos;*/
+  printk(KERN_WARNING "LOOP IS DONE\n");
   return size_read;
 }
 
@@ -280,7 +297,8 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
    *   a while loop / do-while loop is recommended to handle this situation. 
    */
 
-  /* allocate the page and add it all to the list */
+  /* Allocate all the pages we are going to need and add 
+   * them to the list of memory pages */
   while (asgn1_device.num_pages < final_page_no+1) {
     curr = kmalloc(sizeof(page_node), GFP_KERNEL);
     curr->page = alloc_page(GFP_KERNEL);
@@ -296,19 +314,23 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
   printk(KERN_INFO "%s: %d pages total\n", MYDEV_NAME, asgn1_device.num_pages);
   printk(KERN_INFO "%s: %d to be written\n", MYDEV_NAME, count);
 
+  /*while (curr_page_no < begin_page_no) {
+    ptr = ptr->next;
+    curr_page_no++;
+  }*/
   list_for_each(ptr, &asgn1_device.mem_list) {
     if (curr_page_no == begin_page_no) break;
     curr_page_no++;
   }
   curr = list_entry(ptr, page_node, list);
-  if (curr->page == NULL) {
-    printk(KERN_INFO "%s: no page ready to be written to\n", MYDEV_NAME);
-    return -1;
-  }
 
   /* while there is still stuff to be written */
   while (size_written < count) {
     /* get the offset for the current page we are in */
+    if (curr->page == NULL) {
+      printk(KERN_INFO "%s: no page ready to be written to\n", MYDEV_NAME);
+      return -1;
+    }
     begin_offset = *f_pos % PAGE_SIZE;
     size_to_be_written = count-size_written;
     if ((PAGE_SIZE - begin_offset) < size_to_be_written)
@@ -327,7 +349,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
   }
 
 
-  filp->f_pos = f_pos;
+  filp->f_pos = *f_pos;
   asgn1_device.data_size = max(asgn1_device.data_size,
                                orig_f_pos + size_written);
   printk(KERN_INFO "%s: %d bytes written\n", MYDEV_NAME, size_written);
