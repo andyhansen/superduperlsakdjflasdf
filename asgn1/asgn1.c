@@ -253,6 +253,9 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
   struct list_head *ptr = asgn1_device.mem_list.next;
   page_node *curr;
 
+  /* Check if they want to append. If they do then set *f_pos at the end of the file. */
+
+
   /* Allocate all the pages we are going to need and add 
    * them to the list of memory pages */
   while (asgn1_device.num_pages < final_page_no || asgn1_device.num_pages == 0) {
