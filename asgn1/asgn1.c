@@ -117,7 +117,8 @@ int asgn1_open(struct inode *inode, struct file *filp) {
   }
 
   /* If opened in write only mode then free all the pages */
-  if (filp->f_flags == O_WRONLY) free_memory_pages();
+  if (filp->f_flags & O_WRONLY ||
+      filp->f_flags & O_TRUNC) free_memory_pages();
   return 0; /* success */
 }
 
@@ -238,9 +239,8 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
   size_t size_written = 0;  /* size written to virtual disk in this function */
   size_t begin_offset;  /* the offset from the beginning of a page to
 			       start writing */
-  int begin_page_no = *f_pos / PAGE_SIZE;  /* the first page this finction
-					      should start writing to */
-  int final_page_no = (*f_pos + count) / PAGE_SIZE;
+  int begin_page_no;  /* the first page this function should start writing to */
+  int final_page_no;
 
   int curr_page_no = 0;     /* the current page number */
   size_t curr_size_written; /* size written to virtual disk in this round */
@@ -251,17 +251,17 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
   struct list_head *ptr = asgn1_device.mem_list.next;
   page_node *curr;
 
-  printk(KERN_WARNING "Begin write\n");
+  printk(KERN_WARNING "%s: Begin write\n", MYDEV_NAME);
 
   /* Check if they want to append. If they do then set *f_pos at the end of the file. */
   if (filp->f_flags & O_APPEND) {
-    printk(KERN_WARNING "Append\n");
     *f_pos = asgn1_lseek(filp, 0, SEEK_END);
-    begin_page_no = *f_pos / PAGE_SIZE; 
-    final_page_no = (*f_pos + count) / PAGE_SIZE;
+    orig_f_pos = *f_pos;
     printk(KERN_WARNING "%s: device size is %d\n", MYDEV_NAME, asgn1_device.data_size);
     printk(KERN_WARNING "%s: f_pos is %u\n", MYDEV_NAME, *f_pos);
   }
+  begin_page_no = *f_pos / PAGE_SIZE; 
+  final_page_no = (*f_pos + count) / PAGE_SIZE;
 
 
   /* Allocate all the pages we are going to need and add 
@@ -375,7 +375,6 @@ static int asgn1_mmap (struct file *filp, struct vm_area_struct *vma)
     unsigned long ramdisk_size = asgn1_device.num_pages * PAGE_SIZE;
     page_node *curr;
     unsigned long index = 0;
-    struct list_head *ptr;
 
     /* TODO: Not sure if this is right */
     printk(KERN_WARNING "num pages: %d, page size: %d, device size: %d\n", asgn1_device.num_pages, PAGE_SIZE, asgn1_device.data_size);
@@ -383,15 +382,14 @@ static int asgn1_mmap (struct file *filp, struct vm_area_struct *vma)
                                                                     len,
                                                                     ramdisk_size);
     if (offset + len > asgn1_device.data_size) return -1;
-    list_for_each(ptr, &asgn1_device.mem_list) {
-      curr = list_entry(ptr, page_node, list);
+    list_for_each_entry(curr, &asgn1_device.mem_list, list) {
       /* Add a check we haven't gone too far */
       if (index >= offset) {
         if (remap_pfn_range(vma, vma->vm_start + PAGE_SIZE * (index - vma->vm_pgoff),
                         page_to_pfn(curr->page), PAGE_SIZE, vma->vm_page_prot))
           return -EAGAIN;
-        index++;
       }
+      index++;
     }
     /* COMPLETE ME */
     /**
