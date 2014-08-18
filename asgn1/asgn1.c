@@ -3,7 +3,7 @@
  * File: asgn1.c
  * Date: 13/03/2011
  * Author: Andy Hansen
- * Version: 0.1
+ * Version: 0.2
  *
  * This is a module which serves as a virtual ramdisk which disk size is
  * limited by the amount of memory available and serves as the requirement for
@@ -112,13 +112,14 @@ int asgn1_open(struct inode *inode, struct file *filp) {
   if (atomic_read(&asgn1_device.nprocs) >
                       atomic_read(&asgn1_device.max_nprocs)) {
       atomic_dec(&asgn1_device.nprocs);
-      //printk(KERN_WARNING "too many processes\n");
       return -EBUSY;
   }
 
-  /* If opened in write only mode then free all the pages */
-  if (filp->f_flags & O_WRONLY ||
-      filp->f_flags & O_TRUNC) free_memory_pages();
+  /* TODO: Why is this always truncating */
+  if (filp->f_flags & O_APPEND) filp->f_pos = asgn1_device.data_size;
+  if (filp->f_flags & O_TRUNC &&
+      filp->f_flags & O_WRONLY) free_memory_pages();
+
   return 0; /* success */
 }
 
@@ -131,7 +132,8 @@ int asgn1_release (struct inode *inode, struct file *filp) {
   /**
    * decrement process count
    */
-  atomic_dec(&asgn1_device.nprocs);
+  if (atomic_read(&asgn1_device.nprocs) > 0)
+    atomic_dec(&asgn1_device.nprocs);
   return 0;
 }
 
@@ -143,13 +145,13 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 		 loff_t *f_pos) {
   size_t size_read = 0;     /* size read from virtual disk in this function */
   size_t begin_offset;      /* the offset from the beginning of a page to
-			       start reading */
+                               start reading */
   int begin_page_no = *f_pos / PAGE_SIZE; /* the first page which contains
-					     the requested data */
+                                             the requested data */
   int curr_page_no = 0;     /* the current page number */
   size_t curr_size_read;    /* size read from the virtual disk in this round */
   size_t size_to_be_read;   /* size to be read in the current round in 
-			       while loop */
+                               while loop */
   size_t size_not_read;
 
   struct list_head *ptr = asgn1_device.mem_list.next;
@@ -168,19 +170,19 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
   printk(KERN_WARNING "reading %d bytes starting at page %d\n", count, curr_page_no);
 
   /* Make sure what we want to read isn't past the end of what we have written */
-  if (*f_pos+count > asgn1_device.data_size) count = asgn1_device.data_size-*f_pos;
+  if (*f_pos + count > asgn1_device.data_size) count = asgn1_device.data_size-*f_pos;
   while (size_read < count) {
     /* If the page we are trying to read doesn't exist then return as an error */
     if (curr->page == NULL) {
-      return -1;
       printk(KERN_WARNING "Attempting to read an unallocated page\n");
+      return -1;
     }
 
     begin_offset = *f_pos % PAGE_SIZE;
     size_to_be_read = min(count - size_read, PAGE_SIZE - begin_offset);
 
-    printk(KERN_WARNING "offset %d\n", begin_offset);
-    printk(KERN_WARNING "attempting to read %d on page %d\n", size_to_be_read, curr_page_no);
+    /*printk(KERN_WARNING "offset %d\n", begin_offset);
+    printk(KERN_WARNING "attempting to read %d on page %d\n", size_to_be_read, curr_page_no);*/
     size_not_read = copy_to_user(buf + size_read,
                                  page_address(curr->page) + begin_offset,
                                  size_to_be_read);
@@ -188,7 +190,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
     curr_size_read = size_to_be_read - size_not_read;
     *f_pos += curr_size_read;
     size_read += curr_size_read;
-    printk(KERN_WARNING "%d/%d bytes read\n", size_read, asgn1_device.data_size);
+    /*printk(KERN_WARNING "%d/%d bytes read\n", size_read, asgn1_device.data_size);*/
     /* If we didn't read anything in this iteration then stop reading */
     if (size_not_read) break;
     /* Move to the next available page */
@@ -213,7 +215,6 @@ static loff_t asgn1_lseek (struct file *file, loff_t offset, int cmd)
     } else if (cmd == SEEK_CUR) {
       testpos = file->f_pos + offset;
     } else if (cmd == SEEK_END) {
-      /* TODO: is this correct? */
       testpos = asgn1_device.data_size + offset;
     } else {
       printk(KERN_INFO "Wrong command given\n");
@@ -239,34 +240,24 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
   size_t size_written = 0;  /* size written to virtual disk in this function */
   size_t begin_offset;  /* the offset from the beginning of a page to
 			       start writing */
-  int begin_page_no;  /* the first page this function should start writing to */
-  int final_page_no;
+  int begin_page_no = *f_pos / PAGE_SIZE;  /* the first page this function 
+                                              should start writing to */
+  int final_page_no = (*f_pos + count-1) / PAGE_SIZE;
 
   int curr_page_no = 0;     /* the current page number */
   size_t curr_size_written; /* size written to virtual disk in this round */
   size_t size_to_be_written;  /* size to be read in the current round in 
-				 while loop */
+                                 while loop */
   size_t size_not_written;
   
   struct list_head *ptr = asgn1_device.mem_list.next;
   page_node *curr;
 
-  printk(KERN_WARNING "%s: Begin write\n", MYDEV_NAME);
-
-  /* Check if they want to append. If they do then set *f_pos at the end of the file. */
-  if (filp->f_flags & O_APPEND) {
-    *f_pos = asgn1_lseek(filp, 0, SEEK_END);
-    orig_f_pos = *f_pos;
-    printk(KERN_WARNING "%s: device size is %d\n", MYDEV_NAME, asgn1_device.data_size);
-    printk(KERN_WARNING "%s: f_pos is %u\n", MYDEV_NAME, *f_pos);
-  }
-  begin_page_no = *f_pos / PAGE_SIZE; 
-  final_page_no = (*f_pos + count) / PAGE_SIZE;
-
+  printk(KERN_WARNING "\n%s: Begin write\n", MYDEV_NAME);
 
   /* Allocate all the pages we are going to need and add 
    * them to the list of memory pages */
-  while (asgn1_device.num_pages < final_page_no || asgn1_device.num_pages == 0) {
+  while (asgn1_device.num_pages <= final_page_no || asgn1_device.num_pages == 0) {
     curr = kmalloc(sizeof(page_node), GFP_KERNEL);
     curr->page = alloc_page(GFP_KERNEL);
     if (NULL == curr->page) {
@@ -277,7 +268,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
     asgn1_device.num_pages++;
   }
   printk(KERN_INFO "%s: %d pages total\n", MYDEV_NAME, asgn1_device.num_pages);
-  printk(KERN_INFO "%s: %d to be written\n", MYDEV_NAME, count);
+  printk(KERN_INFO "%s: %d to be written\n", MYDEV_NAME, count / PAGE_SIZE);
 
   list_for_each(ptr, &asgn1_device.mem_list) {
     if (curr_page_no == begin_page_no) break;
@@ -294,20 +285,20 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
     begin_offset = *f_pos % PAGE_SIZE;
     /* Make sure the size we are about to write fits within a page */
     size_to_be_written = min(count - size_written, PAGE_SIZE - begin_offset);
-    printk(KERN_INFO "%s: writing %d bytes to page %d from offset %d\n",
-        MYDEV_NAME, size_to_be_written, curr_page_no, begin_offset);
+    /*printk(KERN_INFO "%s: writing %d bytes to page %d from offset %d\n",
+        MYDEV_NAME, size_to_be_written, curr_page_no, begin_offset);*/
 
     size_not_written = copy_from_user(page_address(curr->page) + begin_offset,
                                        buf + size_written,
                                        size_to_be_written);
 
-    /* Update the file position and the total amount written. If the write was not successful
-     * then break out of the loop to prevent any more writes. The user can recall the write
-     * function and try again. */
+    /* Update the file position and the total amount written. If the write was
+     * not successful then break out of the loop to prevent any more writes.
+     * The user can recall the write function and try again. */
     curr_size_written = size_to_be_written - size_not_written;
     *f_pos += curr_size_written;
     size_written += curr_size_written;
-    printk(KERN_INFO "%s: total written %d\n", MYDEV_NAME, size_written);
+    /*printk(KERN_INFO "%s: total written %d\n", MYDEV_NAME, size_written);*/
     if (size_not_written) break;
 
     /* Move to the next page */
@@ -332,10 +323,23 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
  * The ioctl function, which nothing needs to be done in this case.
  */
 long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
-  int nr;
+  int nr = _IOC_NR(cmd);
   int new_nprocs;
   int result;
+  //if (_IOC_TYPE(cmd) != MYDRBASE) return -EINVAL;
 
+  printk(KERN_WARNING "cmd is: %u\n", cmd);
+  switch (nr) {
+    case SET_NPROC_OP:
+      printk(KERN_WARNING "got here\n");
+      result = copy_from_user((int *) &new_nprocs, (int *) arg, sizeof (arg));
+      printk(KERN_WARNING "%d is new nprocs lol\n", new_nprocs);
+      return 0;
+      break;
+    default:
+      printk(KERN_WARNING "Wrong command\n");
+      return -EINVAL;
+  }
   /* COMPLETE ME */
   /** 
    * check whether cmd is for our device, if not for us, return -EINVAL 
@@ -375,30 +379,25 @@ static int asgn1_mmap (struct file *filp, struct vm_area_struct *vma)
     unsigned long ramdisk_size = asgn1_device.num_pages * PAGE_SIZE;
     page_node *curr;
     unsigned long index = 0;
+    unsigned long endpage = len / PAGE_SIZE;
+    
 
-    /* TODO: Not sure if this is right */
+    /*printk(KERN_WARNING "offset: %lu, len: %lu, end page: %lu, pf_off: %lu\n", offset, len, endpage, vma->vm_pgoff);
+
     printk(KERN_WARNING "num pages: %d, page size: %d, device size: %d\n", asgn1_device.num_pages, PAGE_SIZE, asgn1_device.data_size);
     printk(KERN_WARNING "offset: %lu, len: %lu, ramdisk_size: %lu\n", offset,
                                                                     len,
-                                                                    ramdisk_size);
-    if (offset + len > asgn1_device.data_size) return -1;
+                                                                    ramdisk_size);*/
+    //if (offset + len > asgn1_device.data_size) return -1;
     list_for_each_entry(curr, &asgn1_device.mem_list, list) {
       /* Add a check we haven't gone too far */
-      if (index >= offset) {
+      if (index >= offset && index < endpage) {
         if (remap_pfn_range(vma, vma->vm_start + PAGE_SIZE * (index - vma->vm_pgoff),
                         page_to_pfn(curr->page), PAGE_SIZE, vma->vm_page_prot))
           return -EAGAIN;
       }
       index++;
     }
-    /* COMPLETE ME */
-    /**
-     * check offset and len
-     *
-     * loop through the entire page list, once the first requested page
-     *   reached, add each page with remap_pfn_range one by one
-     *   up to the last requested page
-     */
     return 0;
 }
 
@@ -503,7 +502,6 @@ fail_device:
 
   return result;
 }
-
 
 /**
  * Finalise the module
