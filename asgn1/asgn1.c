@@ -320,6 +320,9 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 #define SET_NPROC_OP 1
 #define TEM_SET_NPROC _IOW(MYIOC_TYPE, SET_NPROC_OP, int) 
 
+#define GET_MEMSIZE_OP 2
+#define TEM_GET_MEMSIZE _IOW(MYIOC_TYPE, SET_NPROC_OP, int) 
+
 /**
  * The ioctl function, which nothing needs to be done in this case.
  */
@@ -332,13 +335,17 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
   printk(KERN_WARNING "cmd is: %u\n", cmd);
   switch (nr) {
     case SET_NPROC_OP:
-      printk(KERN_WARNING "got here\n");
+      printk(KERN_WARNING "Setting max nprocs\n");
       result = copy_from_user((int *) &new_nprocs, (int *) arg, sizeof (arg));
       if (result) return -EINVAL;
       if (new_nprocs < atomic_read(&asgn1_device.nprocs)) return -EINVAL;
       atomic_set(&asgn1_device.nprocs, new_nprocs);
       printk(KERN_WARNING "%d is new nprocs lol\n", new_nprocs);
       return 0;
+    case GET_MEMSIZE_OP:
+      printk(KERN_WARNING "Getting memory size\n");
+      /* TODO: implement one of these */
+      break;
     default:
       printk(KERN_WARNING "Wrong command\n");
       return -EINVAL;
