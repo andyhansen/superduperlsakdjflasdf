@@ -154,7 +154,6 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
                                while loop */
   size_t size_not_read;
 
-  struct list_head *ptr = asgn1_device.mem_list.next;
   page_node *curr;
 
   /* Maybe should be just f_pos, not filp->f_pos */
@@ -169,7 +168,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 
   /* Make sure what we want to read isn't past the end of what we have written */
   if (*f_pos + count > asgn1_device.data_size) count = asgn1_device.data_size-*f_pos;
-  printk(KERN_WARNING "\n%s: Being read\n", MYDEV_NAME, count);
+  printk(KERN_WARNING "\n%s: Begin read\n", MYDEV_NAME);
   while (size_read < count) {
     /* If the page we are trying to read doesn't exist then return as an error */
     if (curr->page == NULL) {
@@ -242,7 +241,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 			       start writing */
   int begin_page_no = *f_pos / PAGE_SIZE;  /* the first page this function 
                                               should start writing to */
-  int final_page_no = (*f_pos + count-1) / PAGE_SIZE;
+  int final_page_no = (*f_pos-1 + count) / PAGE_SIZE;
 
   int curr_page_no = 0;     /* the current page number */
   size_t curr_size_written; /* size written to virtual disk in this round */
@@ -257,7 +256,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
   /* Allocate all the pages we are going to need and add 
    * them to the list of memory pages */
-  while (asgn1_device.num_pages <= final_page_no || asgn1_device.num_pages == 0) {
+  while (asgn1_device.num_pages <= final_page_no) {
     if (asgn1_device.num_pages == 16) return -ENOMEM;
     curr = kmalloc(sizeof(page_node), GFP_KERNEL);
     curr->page = alloc_page(GFP_KERNEL);
@@ -271,43 +270,33 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
   //printk(KERN_INFO "%s: %d pages total\n", MYDEV_NAME, asgn1_device.num_pages);
   //printk(KERN_INFO "%s: %u to be written\n", MYDEV_NAME, count / PAGE_SIZE);
 
-  list_for_each(ptr, &asgn1_device.mem_list) {
-    if (curr_page_no == begin_page_no) break;
-    curr_page_no++;
-  }
-  curr = list_entry(ptr, page_node, list);
-
-  while (size_written < count) {
-    /* Return an error if the page we are to write to isn't initiallised */
-    if (curr->page == NULL) {
-      printk(KERN_INFO "%s: no page ready to be written to\n", MYDEV_NAME);
-      return -1;
-    }
-    begin_offset = *f_pos % PAGE_SIZE;
-    /* Make sure the size we are about to write fits within a page */
-    size_to_be_written = min((int) count - size_written, (int) PAGE_SIZE - begin_offset);
-    /*printk(KERN_INFO "%s: writing %d bytes to page %d from offset %d\n",
+  list_for_each_entry(curr, &asgn1_device.mem_list, list) {
+    if (begin_page_no <= curr_page_no && curr_page_no <= final_page_no) {
+      if (curr->page == NULL) {
+        printk(KERN_INFO "%s: no page ready to be written to\n", MYDEV_NAME);
+        return -1;
+      }
+      begin_offset = *f_pos % PAGE_SIZE;
+      /* Make sure the size we are about to write fits within a page */
+      size_to_be_written = min((int) count - size_written, (int) PAGE_SIZE - begin_offset);
+      /*printk(KERN_INFO "%s: writing %d bytes to page %d from offset %d\n",
         MYDEV_NAME, size_to_be_written, curr_page_no, begin_offset);*/
 
-    size_not_written = copy_from_user(page_address(curr->page) + begin_offset,
-                                       buf + size_written,
-                                       size_to_be_written);
+      size_not_written = copy_from_user(page_address(curr->page) + begin_offset,
+          buf + size_written,
+          size_to_be_written);
 
-    /* Update the file position and the total amount written. If the write was
-     * not successful then break out of the loop to prevent any more writes.
-     * The user can recall the write function and try again. */
-    curr_size_written = size_to_be_written - size_not_written;
-    *f_pos += curr_size_written;
-    size_written += curr_size_written;
-    /*printk(KERN_INFO "%s: total written %d\n", MYDEV_NAME, size_written);*/
-    if (size_not_written) break;
-
-    /* Move to the next page */
-    ptr = ptr->next;
-    curr = list_entry(ptr, page_node, list);
+      /* Update the file position and the total amount written. If the write was
+       * not successful then break out of the loop to prevent any more writes.
+       * The user can recall the write function and try again. */
+      curr_size_written = size_to_be_written - size_not_written;
+      *f_pos += curr_size_written;
+      size_written += curr_size_written;
+      /*printk(KERN_INFO "%s: total written %d\n", MYDEV_NAME, size_written);*/
+      if (size_not_written) break;
+    }
     curr_page_no++;
   }
-
 
   /* TODO: may not be needed */
   filp->f_pos = *f_pos;
