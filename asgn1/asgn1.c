@@ -112,6 +112,8 @@ int asgn1_open(struct inode *inode, struct file *filp) {
   if (atomic_read(&asgn1_device.nprocs) >
                       atomic_read(&asgn1_device.max_nprocs)) {
       atomic_dec(&asgn1_device.nprocs);
+      printk(KERN_WARNING "I'M BLOODY BUSY MATE nprocs is %d\n",
+          atomic_read(&asgn1_device.nprocs));
       return -EBUSY;
   }
 
@@ -148,6 +150,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
                                start reading */
   int begin_page_no = *f_pos / PAGE_SIZE; /* the first page which contains
                                              the requested data */
+  int final_page_no = (*f_pos - 1 + count) / PAGE_SIZE;
   int curr_page_no = 0;     /* the current page number */
   size_t curr_size_read;    /* size read from the virtual disk in this round */
   size_t size_to_be_read;   /* size to be read in the current round in 
@@ -157,45 +160,40 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
   page_node *curr;
 
   /* Maybe should be just f_pos, not filp->f_pos */
-  if (*f_pos >= asgn1_device.data_size) return 0;
-  /* Seek to the right starting page */
-  list_for_each(ptr, &asgn1_device.mem_list) {
-    if (curr_page_no == begin_page_no) break;
-    curr_page_no++;
-  }
-  curr = list_entry(ptr, page_node, list);
-  printk(KERN_WARNING "reading %d bytes starting at page %d\n", count, curr_page_no);
-
-  /* Make sure what we want to read isn't past the end of what we have written */
-  if (*f_pos + count > asgn1_device.data_size) count = asgn1_device.data_size-*f_pos;
   printk(KERN_WARNING "\n%s: Begin read\n", MYDEV_NAME);
-  while (size_read < count) {
-    /* If the page we are trying to read doesn't exist then return as an error */
-    if (curr->page == NULL) {
-      printk(KERN_WARNING "Attempting to read an unallocated page\n");
-      return -1;
+  if (*f_pos >= asgn1_device.data_size) return 0;
+  if (*f_pos + count > asgn1_device.data_size) count = asgn1_device.data_size-*f_pos;
+  printk(KERN_WARNING "reading %d bytes starting at page %d\n", count, curr_page_no);
+  /* Seek to the right starting page */
+  list_for_each_entry(curr, &asgn1_device.mem_list, list) {
+    if (begin_page_no <= curr_page_no && curr_page_no <= final_page_no) {
+      if (curr->page == NULL) {
+        printk(KERN_WARNING "Attempting to read an unallocated page\n");
+        return -1;
+      }
+
+      begin_offset = *f_pos % PAGE_SIZE;
+      size_to_be_read = min((int)count - size_read, (int)PAGE_SIZE - begin_offset);
+
+      /*printk(KERN_WARNING "offset %d\n", begin_offset);
+        printk(KERN_WARNING "attempting to read %d on page %d\n",
+                               size_to_be_read, curr_page_no);*/
+
+      size_not_read = copy_to_user(buf + size_read,
+          page_address(curr->page) + begin_offset,
+          size_to_be_read);
+
+      curr_size_read = size_to_be_read - size_not_read;
+      *f_pos += curr_size_read;
+      size_read += curr_size_read;
+      /*printk(KERN_WARNING "%d/%d bytes read\n", size_read, asgn1_device.data_size);*/
+
+      /* If we didn't read enough in this iteration then stop reading */
+      if (size_not_read) break;
     }
-
-    begin_offset = *f_pos % PAGE_SIZE;
-    size_to_be_read = min((int)count - size_read, (int)PAGE_SIZE - begin_offset);
-
-    /*printk(KERN_WARNING "offset %d\n", begin_offset);
-    printk(KERN_WARNING "attempting to read %d on page %d\n", size_to_be_read, curr_page_no);*/
-    size_not_read = copy_to_user(buf + size_read,
-                                 page_address(curr->page) + begin_offset,
-                                 size_to_be_read);
-
-    curr_size_read = size_to_be_read - size_not_read;
-    *f_pos += curr_size_read;
-    size_read += curr_size_read;
-    /*printk(KERN_WARNING "%d/%d bytes read\n", size_read, asgn1_device.data_size);*/
-    /* If we didn't read anything in this iteration then stop reading */
-    if (size_not_read) break;
-    /* Move to the next available page */
-    ptr = ptr->next;
-    curr = list_entry(ptr, page_node, list);
     curr_page_no++;
   }
+
   printk(KERN_WARNING "%s: %d bytes read\n", MYDEV_NAME, size_read);
   return size_read;
 }
@@ -209,21 +207,24 @@ static loff_t asgn1_lseek (struct file *file, loff_t offset, int cmd)
     size_t buffer_size = asgn1_device.num_pages * PAGE_SIZE;
 
     /* Can change this to a switch statement */
-    if (cmd == SEEK_SET) {
-      testpos = offset;
-    } else if (cmd == SEEK_CUR) {
-      testpos = file->f_pos + offset;
-    } else if (cmd == SEEK_END) {
-      testpos = asgn1_device.data_size + offset;
-    } else {
-      printk(KERN_INFO "Wrong command given\n");
-      return -EINVAL;
+    switch (cmd) {
+      case SEEK_SET:
+        testpos = offset;
+        break;
+      case SEEK_CUR:
+        testpos = file->f_pos + offset;
+        break;
+      case SEEK_END:
+        testpos = asgn1_device.data_size + offset;
+        break;
+      default:
+        return -EINVAL;
     }
-    
+
     if (testpos < 0) testpos = 0;
     else if (testpos > buffer_size) testpos = buffer_size;
 
-    printk (KERN_INFO "Seeking to pos=%ld\n", (long)testpos);
+    //printk (KERN_INFO "Seeking to pos=%ld\n", (long)testpos);
     file->f_pos = testpos;
     return testpos;
 }
@@ -249,7 +250,6 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
                                  while loop */
   size_t size_not_written;
   
-  struct list_head *ptr = asgn1_device.mem_list.next;
   page_node *curr;
 
   printk(KERN_WARNING "\n%s: Begin write\n", MYDEV_NAME);
@@ -310,44 +310,41 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 #define TEM_SET_NPROC _IOW(MYIOC_TYPE, SET_NPROC_OP, int) 
 
 #define GET_MEMSIZE_OP 2
-#define TEM_GET_MEMSIZE _IOW(MYIOC_TYPE, SET_NPROC_OP, int) 
+#define TEM_GET_MEMSIZE _IOW(MYIOC_TYPE, GET_MEMSIZE_OP, int) 
 
+#define GET_CUR_PROCS 3
+#define TEM_GET_CUR_PROCS _IOW(MYIOC_TYPE, GET_CUR_PROCS, int) 
 /**
  * The ioctl function, which nothing needs to be done in this case.
  */
 long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
-  int nr = _IOC_NR(cmd);
+  int nr;
   int new_nprocs;
   int result;
-  if (_IOC_TYPE(cmd) != MYIOC_TYPE) return -EINVAL;
 
-  printk(KERN_WARNING "cmd is: %u\n", cmd);
+  if (_IOC_TYPE(cmd) != MYIOC_TYPE) return -EINVAL;
+  nr = _IOC_NR(cmd);
+
   switch (nr) {
     case SET_NPROC_OP:
       printk(KERN_WARNING "Setting max nprocs\n");
       result = copy_from_user((int *) &new_nprocs, (int *) arg, sizeof (arg));
       if (result) return -EINVAL;
       if (new_nprocs < atomic_read(&asgn1_device.nprocs)) return -EINVAL;
-      atomic_set(&asgn1_device.nprocs, new_nprocs);
-      printk(KERN_WARNING "%d is new nprocs lol\n", new_nprocs);
+      atomic_set(&asgn1_device.max_nprocs, new_nprocs);
+      printk(KERN_WARNING "%d is new nprocs\n", new_nprocs);
       return 0;
     case GET_MEMSIZE_OP:
       printk(KERN_WARNING "Getting memory size\n");
-      /* TODO: implement one of these */
+      return asgn1_device.num_pages * PAGE_SIZE;
       break;
+    case GET_CUR_PROCS:
+      printk(KERN_WARNING "Getting number of pages allocated\n");
+      return atomic_read(&asgn1_device.nprocs);
     default:
       printk(KERN_WARNING "Wrong command\n");
       return -EINVAL;
   }
-  /* COMPLETE ME */
-  /** 
-   * check whether cmd is for our device, if not for us, return -EINVAL 
-   *
-   * get command, and if command is SET_NPROC_OP, then get the data, and
-     set max_nprocs accordingly, don't forget to check validity of the 
-     value before setting max_nprocs
-   */
-
   return -ENOTTY;
 }
 
@@ -369,7 +366,6 @@ int asgn1_read_procmem(char *buf, char **start, off_t offset, int count,
 
 static int asgn1_mmap (struct file *filp, struct vm_area_struct *vma)
 {
-    //unsigned long pfn;
     unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
     unsigned long len = vma->vm_end - vma->vm_start;
     unsigned long ramdisk_size = asgn1_device.num_pages * PAGE_SIZE;
@@ -426,17 +422,14 @@ int __init asgn1_init_module(void){
    * create proc entries
    */
 
-  /* TODO: Remember to add error checking */
   atomic_set(&asgn1_device.nprocs, 0);
   atomic_set(&asgn1_device.max_nprocs, 1);
   result = alloc_chrdev_region(&asgn1_device.dev, asgn1_minor,
                                        asgn1_dev_count, MYDEV_NAME);
   if (result < 0) {
     printk(KERN_WARNING "%s: couldn't get a major number\n", MYDEV_NAME);
-    /* TODO: Get the right return code */
     goto fail_device;
   }
-
   /* Set the major number variable*/
   asgn1_major = MAJOR(asgn1_device.dev);
   printk(KERN_INFO "%s: allocated the major number %d\n", MYDEV_NAME, asgn1_major);
