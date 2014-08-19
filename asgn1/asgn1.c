@@ -12,7 +12,7 @@
  * Note: multiple devices and concurrent modules are not supported in this
  *       version.
  */
- 
+
 /* This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version
@@ -77,7 +77,7 @@ void free_memory_pages(void) {
   struct list_head *ptr;
   struct list_head *tmp;
 
-  printk(KERN_INFO "%s: %d pages freed\n", MYDEV_NAME, asgn1_device.num_pages);
+  //printk(KERN_INFO "%s: %d pages freed\n", MYDEV_NAME, asgn1_device.num_pages);
   /* Loop through the page list */
   list_for_each_safe(ptr, tmp, &asgn1_device.mem_list) {
     /* If a page has been allocated, free it. The list node is then deleted */
@@ -110,14 +110,11 @@ int asgn1_open(struct inode *inode, struct file *filp) {
   /* Look at lecture 4 slide 16 for what to do here */
   atomic_inc(&asgn1_device.nprocs);
   if (atomic_read(&asgn1_device.nprocs) >
-                      atomic_read(&asgn1_device.max_nprocs)) {
-      atomic_dec(&asgn1_device.nprocs);
-      printk(KERN_WARNING "I'M BLOODY BUSY MATE nprocs is %d\n",
-          atomic_read(&asgn1_device.nprocs));
-      return -EBUSY;
+      atomic_read(&asgn1_device.max_nprocs)) {
+    atomic_dec(&asgn1_device.nprocs);
+    return -EBUSY;
   }
 
-  /* TODO: Why is this always truncating */
   if (filp->f_flags & O_APPEND) filp->f_pos = asgn1_device.data_size;
   if (filp->f_flags & O_TRUNC &&
       filp->f_flags & O_WRONLY) free_memory_pages();
@@ -144,7 +141,7 @@ int asgn1_release (struct inode *inode, struct file *filp) {
  * This function reads contents of the virtual disk and writes to the user 
  */
 ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
-		 loff_t *f_pos) {
+    loff_t *f_pos) {
   size_t size_read = 0;     /* size read from virtual disk in this function */
   size_t begin_offset;      /* the offset from the beginning of a page to
                                start reading */
@@ -160,10 +157,10 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
   page_node *curr;
 
   /* Maybe should be just f_pos, not filp->f_pos */
-  printk(KERN_WARNING "\n%s: Begin read\n", MYDEV_NAME);
+  //printk(KERN_WARNING "\n%s: Begin read\n", MYDEV_NAME);
   if (*f_pos >= asgn1_device.data_size) return 0;
   if (*f_pos + count > asgn1_device.data_size) count = asgn1_device.data_size-*f_pos;
-  printk(KERN_WARNING "reading %d bytes starting at page %d\n", count, curr_page_no);
+  //printk(KERN_WARNING "reading %d bytes starting at page %d\n", count, curr_page_no);
   /* Seek to the right starting page */
   list_for_each_entry(curr, &asgn1_device.mem_list, list) {
     if (begin_page_no <= curr_page_no && curr_page_no <= final_page_no) {
@@ -177,7 +174,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 
       /*printk(KERN_WARNING "offset %d\n", begin_offset);
         printk(KERN_WARNING "attempting to read %d on page %d\n",
-                               size_to_be_read, curr_page_no);*/
+        size_to_be_read, curr_page_no);*/
 
       size_not_read = copy_to_user(buf + size_read,
           page_address(curr->page) + begin_offset,
@@ -203,30 +200,30 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 
 static loff_t asgn1_lseek (struct file *file, loff_t offset, int cmd)
 {
-    loff_t testpos;
-    size_t buffer_size = asgn1_device.num_pages * PAGE_SIZE;
+  loff_t testpos;
+  size_t buffer_size = asgn1_device.num_pages * PAGE_SIZE;
 
-    /* Can change this to a switch statement */
-    switch (cmd) {
-      case SEEK_SET:
-        testpos = offset;
-        break;
-      case SEEK_CUR:
-        testpos = file->f_pos + offset;
-        break;
-      case SEEK_END:
-        testpos = asgn1_device.data_size + offset;
-        break;
-      default:
-        return -EINVAL;
-    }
+  /* Can change this to a switch statement */
+  switch (cmd) {
+    case SEEK_SET:
+      testpos = offset;
+      break;
+    case SEEK_CUR:
+      testpos = file->f_pos + offset;
+      break;
+    case SEEK_END:
+      testpos = asgn1_device.data_size + offset;
+      break;
+    default:
+      return -EINVAL;
+  }
 
-    if (testpos < 0) testpos = 0;
-    else if (testpos > buffer_size) testpos = buffer_size;
+  if (testpos < 0) testpos = 0;
+  else if (testpos > buffer_size) testpos = buffer_size;
 
-    //printk (KERN_INFO "Seeking to pos=%ld\n", (long)testpos);
-    file->f_pos = testpos;
-    return testpos;
+  //printk (KERN_INFO "Seeking to pos=%ld\n", (long)testpos);
+  file->f_pos = testpos;
+  return testpos;
 }
 
 
@@ -235,11 +232,11 @@ static loff_t asgn1_lseek (struct file *file, loff_t offset, int cmd)
  * module
  */
 ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
-		  loff_t *f_pos) {
+    loff_t *f_pos) {
   size_t orig_f_pos = *f_pos;  /* the original file position */
   size_t size_written = 0;  /* size written to virtual disk in this function */
   size_t begin_offset;  /* the offset from the beginning of a page to
-			       start writing */
+                           start writing */
   int begin_page_no = *f_pos / PAGE_SIZE;  /* the first page this function 
                                               should start writing to */
   int final_page_no = (*f_pos-1 + count) / PAGE_SIZE;
@@ -249,10 +246,10 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
   size_t size_to_be_written;  /* size to be read in the current round in 
                                  while loop */
   size_t size_not_written;
-  
+
   page_node *curr;
 
-  printk(KERN_WARNING "\n%s: Begin write\n", MYDEV_NAME);
+  //printk(KERN_WARNING "\n%s: Begin write\n", MYDEV_NAME);
 
   /* Allocate all the pages we are going to need and add 
    * them to the list of memory pages */
@@ -298,10 +295,9 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
     curr_page_no++;
   }
 
-  /* TODO: may not be needed */
   filp->f_pos = *f_pos;
   asgn1_device.data_size = max(asgn1_device.data_size,
-                               orig_f_pos + size_written);
+      orig_f_pos + size_written);
   printk(KERN_INFO "%s: %d bytes written\n", MYDEV_NAME, size_written);
   return (size_written > 0) ? size_written : -EFAULT;
 }
@@ -328,7 +324,7 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
   switch (nr) {
     case SET_NPROC_OP:
       printk(KERN_WARNING "Setting max nprocs\n");
-      result = copy_from_user((int *) &new_nprocs, (int *) arg, sizeof (arg));
+      result = get_user(new_nprocs, (int *) arg);
       if (result) return -EINVAL;
       if (new_nprocs < atomic_read(&asgn1_device.nprocs)) return -EINVAL;
       atomic_set(&asgn1_device.max_nprocs, new_nprocs);
@@ -354,43 +350,32 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
  * which helps debugging.
  */
 int asgn1_read_procmem(char *buf, char **start, off_t offset, int count,
-		     int *eof, void *data) {
-  /* stub */
-  int result;
-
-  result = sprintf(buf, "Amount written: %d, Ramdisk size: %ld\n",
-      asgn1_device.data_size, PAGE_SIZE * asgn1_device.num_pages);
-  return result;
+    int *eof, void *data) {
+  return sprintf(buf, "Amount written: %d, Allocated space: %ld, Space left: %ld\n",
+      asgn1_device.data_size, PAGE_SIZE * asgn1_device.num_pages,
+      (PAGE_SIZE * 16) - asgn1_device.data_size);
 }
 
 
 static int asgn1_mmap (struct file *filp, struct vm_area_struct *vma)
 {
-    unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
-    unsigned long len = vma->vm_end - vma->vm_start;
-    unsigned long ramdisk_size = asgn1_device.num_pages * PAGE_SIZE;
-    page_node *curr;
-    unsigned long index = 0;
-    unsigned long endpage = offset + len / PAGE_SIZE;
-    
+  unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+  unsigned long len = vma->vm_end - vma->vm_start;
+  unsigned long ramdisk_size = asgn1_device.num_pages * PAGE_SIZE;
+  page_node *curr;
+  unsigned long index = 0;
+  unsigned long endpage = offset + len / PAGE_SIZE;
 
-    /*printk(KERN_WARNING "offset: %lu, len: %lu, end page: %lu, pf_off: %lu\n", offset, len, endpagetest, vma->vm_pgoff);
-
-    printk(KERN_WARNING "num pages: %d, page size: %d, device size: %d\n", asgn1_device.num_pages, PAGE_SIZE, asgn1_device.data_size);
-    printk(KERN_WARNING "offset: %lu, len: %lu, ramdisk_size: %lu\n", offset,
-                                                                    len,
-                                                                    ramdisk_size);*/
-    if (offset + len > ramdisk_size) return -1;
-    list_for_each_entry(curr, &asgn1_device.mem_list, list) {
-      /* Add a check we haven't gone too far */
-      if (index >= offset && index < endpage) {
-        if (remap_pfn_range(vma, vma->vm_start + PAGE_SIZE * (index - vma->vm_pgoff),
-                        page_to_pfn(curr->page), PAGE_SIZE, vma->vm_page_prot))
-          return -EAGAIN;
-      }
-      index++;
+  if (offset + len > ramdisk_size) return -1;
+  list_for_each_entry(curr, &asgn1_device.mem_list, list) {
+    if (index >= offset && index < endpage) {
+      if (remap_pfn_range(vma, vma->vm_start + PAGE_SIZE * (index - vma->vm_pgoff),
+            page_to_pfn(curr->page), PAGE_SIZE, vma->vm_page_prot))
+        return -EAGAIN;
     }
-    return 0;
+    index++;
+  }
+  return 0;
 }
 
 
@@ -425,7 +410,7 @@ int __init asgn1_init_module(void){
   atomic_set(&asgn1_device.nprocs, 0);
   atomic_set(&asgn1_device.max_nprocs, 1);
   result = alloc_chrdev_region(&asgn1_device.dev, asgn1_minor,
-                                       asgn1_dev_count, MYDEV_NAME);
+      asgn1_dev_count, MYDEV_NAME);
   if (result < 0) {
     printk(KERN_WARNING "%s: couldn't get a major number\n", MYDEV_NAME);
     goto fail_device;
@@ -450,7 +435,6 @@ int __init asgn1_init_module(void){
   /* Initialise the list head */
   INIT_LIST_HEAD(&asgn1_device.mem_list);
 
-  /* TODO: make sure this is the right thing work out where to put fops*/
   proc_entry = create_proc_entry("asgn1", S_IRUGO | S_IWUSR, NULL);
   if (!proc_entry) {
     printk(KERN_WARNING "%s: failed making the proc\n", "proc_entry");
@@ -464,33 +448,29 @@ int __init asgn1_init_module(void){
   }
 
   asgn1_device.device = device_create(asgn1_device.class, NULL, 
-                                      asgn1_device.dev, "%s", MYDEV_NAME);
+      asgn1_device.dev, "%s", MYDEV_NAME);
   if (IS_ERR(asgn1_device.device)) {
     printk(KERN_WARNING "%s: can't create udev device\n", MYDEV_NAME);
     result = -ENOMEM;
     goto fail_device;
   }
-  
-  printk(KERN_WARNING "set up udev entry\n");
-  printk(KERN_WARNING "Hello world from %s\n", MYDEV_NAME);
+
+  printk(KERN_WARNING "%s: set up udev entry\n", MYDEV_NAME);
   return 0;
 
   /* cleanup code called when any of the initialization steps fail */
 fail_device:
-   class_destroy(asgn1_device.class);
+  class_destroy(asgn1_device.class);
 
-  /* COMPLETE ME */
-  /* PLEASE PUT YOUR CLEANUP CODE HERE, IN REVERSE ORDER OF ALLOCATION */
-
-   /* proc */
-   remove_proc_entry("asgn1", NULL);
-   /* remove list head */
-   /* de-register the device */
-   cdev_del(asgn1_device.cdev);
-   /* unregister device */
-   unregister_chrdev_region(asgn1_device.dev, asgn1_dev_count);
+  /* remove the proc proc */
+  if (proc_entry) remove_proc_entry("asgn1", NULL);
+  /* de-register the device */
+  cdev_del(asgn1_device.cdev);
+  /* unregister device */
+  unregister_chrdev_region(asgn1_device.dev, asgn1_dev_count);
 
 
+  printk(KERN_WARNING "%s: failed mounting. Retry\n", MYDEV_NAME);
 
   return result;
 }
@@ -501,14 +481,14 @@ fail_device:
 void __exit asgn1_exit_module(void){
   device_destroy(asgn1_device.class, asgn1_device.dev);
   class_destroy(asgn1_device.class);
-  printk(KERN_WARNING "cleaned up udev entry\n");
-  
+  //printk(KERN_WARNING "%s: cleaned up udev entry\n", MYDEV_NAME);
+
   remove_proc_entry("asgn1", NULL);
   free_memory_pages();
   cdev_del(asgn1_device.cdev);
   /* unregister device */
   unregister_chrdev_region(asgn1_device.dev, asgn1_dev_count);
-  printk(KERN_WARNING "Good bye from %s\n", MYDEV_NAME);
+  printk(KERN_WARNING "%s: dismounted.\n", MYDEV_NAME);
 }
 
 
