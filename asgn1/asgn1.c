@@ -32,6 +32,7 @@
 
 #define MYDEV_NAME "asgn1"
 #define MYIOC_TYPE 'k'
+#define MYPROC_NAME "asgn1"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Andy Hansen");
@@ -107,7 +108,6 @@ int asgn1_open(struct inode *inode, struct file *filp) {
    *
    */
 
-  /* Look at lecture 4 slide 16 for what to do here */
   atomic_inc(&asgn1_device.nprocs);
   if (atomic_read(&asgn1_device.nprocs) >
       atomic_read(&asgn1_device.max_nprocs)) {
@@ -128,9 +128,6 @@ int asgn1_open(struct inode *inode, struct file *filp) {
  * in this case. 
  */
 int asgn1_release (struct inode *inode, struct file *filp) {
-  /**
-   * decrement process count
-   */
   if (atomic_read(&asgn1_device.nprocs) > 0)
     atomic_dec(&asgn1_device.nprocs);
   return 0;
@@ -203,7 +200,6 @@ static loff_t asgn1_lseek (struct file *file, loff_t offset, int cmd)
   loff_t testpos;
   size_t buffer_size = asgn1_device.num_pages * PAGE_SIZE;
 
-  /* Can change this to a switch statement */
   switch (cmd) {
     case SEEK_SET:
       testpos = offset;
@@ -221,7 +217,6 @@ static loff_t asgn1_lseek (struct file *file, loff_t offset, int cmd)
   if (testpos < 0) testpos = 0;
   else if (testpos > buffer_size) testpos = buffer_size;
 
-  //printk (KERN_INFO "Seeking to pos=%ld\n", (long)testpos);
   file->f_pos = testpos;
   return testpos;
 }
@@ -305,11 +300,11 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 #define SET_NPROC_OP 1
 #define TEM_SET_NPROC _IOW(MYIOC_TYPE, SET_NPROC_OP, int) 
 
-#define GET_MEMSIZE_OP 2
-#define TEM_GET_MEMSIZE _IOW(MYIOC_TYPE, GET_MEMSIZE_OP, int) 
+#define GET_CUR_PROCS_OP 2
+#define TEM_GET_CUR_PROCS _IO(MYIOC_TYPE, GET_CUR_PROCS_OP)
 
-#define GET_CUR_PROCS 3
-#define TEM_GET_CUR_PROCS _IOW(MYIOC_TYPE, GET_CUR_PROCS, int) 
+#define GET_REMAINING_SPACE_OP 3
+#define TEM_GET_REMAINING_SPACE _IO(MYIOC_TYPE, GET_REMAINING_SPACE_OP)
 /**
  * The ioctl function, which nothing needs to be done in this case.
  */
@@ -330,33 +325,43 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
       atomic_set(&asgn1_device.max_nprocs, new_nprocs);
       printk(KERN_WARNING "%d is new nprocs\n", new_nprocs);
       return 0;
-    case GET_MEMSIZE_OP:
-      printk(KERN_WARNING "Getting memory size\n");
-      return asgn1_device.num_pages * PAGE_SIZE;
-      break;
-    case GET_CUR_PROCS:
+    case GET_CUR_PROCS_OP:
       printk(KERN_WARNING "Getting number of pages allocated\n");
       return atomic_read(&asgn1_device.nprocs);
+    case GET_REMAINING_SPACE_OP: 
+      printk(KERN_WARNING "Getting remaining space\n");
+      return (PAGE_SIZE * 16) - asgn1_device.data_size;
     default:
       printk(KERN_WARNING "Wrong command\n");
       return -EINVAL;
   }
-  return -ENOTTY;
 }
 
 
 /**
  * Displays information about current status of the module,
- * which helps debugging.
+ * which helps debugging. This message will tell the caller
+ * how many bytes they have written to the device, how much 
+ * space it has been currently allocated, and how much space
+ * is left for it to use.
  */
 int asgn1_read_procmem(char *buf, char **start, off_t offset, int count,
     int *eof, void *data) {
-  return sprintf(buf, "Amount written: %d, Allocated space: %ld, Space left: %ld\n",
+  int result;
+  /* 70 is the largest amount of space this print statement can take up */
+  if (70 > count) return -EINVAL;
+  result =
+      sprintf(buf, "Amount written: %d, Allocated space: %ld, Remaining left: %ld\n",
       asgn1_device.data_size, PAGE_SIZE * asgn1_device.num_pages,
       (PAGE_SIZE * 16) - asgn1_device.data_size);
+  *eof = 1;
+  return result;
 }
 
 
+/**
+ * Directly maps memory between virtual memory and the passed in
+ */
 static int asgn1_mmap (struct file *filp, struct vm_area_struct *vma)
 {
   unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
@@ -364,9 +369,10 @@ static int asgn1_mmap (struct file *filp, struct vm_area_struct *vma)
   unsigned long ramdisk_size = asgn1_device.num_pages * PAGE_SIZE;
   page_node *curr;
   unsigned long index = 0;
-  unsigned long endpage = offset + len / PAGE_SIZE;
+  unsigned long endpage = offset + (len / PAGE_SIZE);
 
-  if (offset + len > ramdisk_size) return -1;
+  /* check that they don't want to map past memory that we have available */
+  if ((offset * PAGE_SIZE) + len > ramdisk_size) return -EINVAL;
   list_for_each_entry(curr, &asgn1_device.mem_list, list) {
     if (index >= offset && index < endpage) {
       if (remap_pfn_range(vma, vma->vm_start + PAGE_SIZE * (index - vma->vm_pgoff),
@@ -396,16 +402,6 @@ struct file_operations asgn1_fops = {
  */
 int __init asgn1_init_module(void){
   int result; 
-  /* COMPLETE ME */
-  /**
-   * set nprocs and max_nprocs of the device
-   *
-   * allocate major number
-   * allocate cdev, and set ops and owner field 
-   * add cdev
-   * initialize the page list
-   * create proc entries
-   */
 
   atomic_set(&asgn1_device.nprocs, 0);
   atomic_set(&asgn1_device.max_nprocs, 1);
@@ -435,12 +431,13 @@ int __init asgn1_init_module(void){
   /* Initialise the list head */
   INIT_LIST_HEAD(&asgn1_device.mem_list);
 
-  proc_entry = create_proc_entry("asgn1", S_IRUGO | S_IWUSR, NULL);
+  proc_entry = create_proc_entry(MYPROC_NAME, S_IRUGO | S_IWUSR, NULL);
   if (!proc_entry) {
-    printk(KERN_WARNING "%s: failed making the proc\n", "proc_entry");
+    printk(KERN_WARNING "%s: failed making the proc entry\n", MYDEV_NAME);
     result = -1;
     goto fail_device;
   }
+  printk(KERN_WARNING "%s: failed making the proc entry\n", MYDEV_NAME);
   proc_entry->read_proc = asgn1_read_procmem;
 
   asgn1_device.class = class_create(THIS_MODULE, MYDEV_NAME);
@@ -463,7 +460,7 @@ fail_device:
   class_destroy(asgn1_device.class);
 
   /* remove the proc proc */
-  if (proc_entry) remove_proc_entry("asgn1", NULL);
+  if (proc_entry) remove_proc_entry(MYPROC_NAME, NULL);
   /* de-register the device */
   cdev_del(asgn1_device.cdev);
   /* unregister device */
@@ -483,7 +480,7 @@ void __exit asgn1_exit_module(void){
   class_destroy(asgn1_device.class);
   //printk(KERN_WARNING "%s: cleaned up udev entry\n", MYDEV_NAME);
 
-  remove_proc_entry("asgn1", NULL);
+  remove_proc_entry(MYPROC_NAME, NULL);
   free_memory_pages();
   cdev_del(asgn1_device.cdev);
   /* unregister device */

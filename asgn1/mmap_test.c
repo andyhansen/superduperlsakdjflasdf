@@ -14,6 +14,12 @@
 #define SET_NPROC_OP 1
 #define ASGN1_SET_NPROC _IOW(MYIOC_TYPE, SET_NPROC_OP, sizeof(int)) 
 
+#define GET_CUR_PROCS_OP 2
+#define ASGN1_GET_CUR_PROCS _IO(MYIOC_TYPE, GET_CUR_PROCS_OP)
+
+#define GET_REMAINING_SPACE_OP 3
+#define ASGN1_GET_REMAINING_SPACE _IO(MYIOC_TYPE, GET_REMAINING_SPACE_OP)
+
 
 
 ssize_t my_fread(int fildes, void *buf, size_t nbyte) {
@@ -87,6 +93,8 @@ int main (int argc, char **argv)
     int fd;
     char *buf, *read_buf, *mmap_buf, *filename = "/dev/asgn1";
     int nproc = 12345;
+    long proc_count;
+    long free_space;
 
     srandom (getpid ());
 
@@ -153,5 +161,18 @@ int main (int argc, char **argv)
         exit (1);
     }
     printf("nproc set to %d\n", nproc);
+
+    if ((proc_count = ioctl (fd, ASGN1_GET_CUR_PROCS)) < 0) {
+        fprintf (stderr, "ioctl failed:  %s\n", strerror (errno));
+        exit (1);
+    }
+    fprintf(stderr, "%ld process(es) using this module\n", proc_count);
+
+    if ((free_space = ioctl (fd, ASGN1_GET_REMAINING_SPACE)) < 0) {
+        fprintf (stderr, "ioctl failed:  %s\n", strerror (errno));
+        exit (1);
+    }
+    fprintf(stderr, "%ld space left in the module\n", free_space);
+
     return 0;
 }
