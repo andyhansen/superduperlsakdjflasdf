@@ -15,10 +15,10 @@
 #define ASGN1_SET_NPROC _IOW(MYIOC_TYPE, SET_NPROC_OP, sizeof(int)) 
 
 #define GET_CUR_PROCS_OP 2
-#define ASGN1_GET_CUR_PROCS _IO(MYIOC_TYPE, GET_CUR_PROCS_OP)
+#define ASGN1_GET_CUR_PROCS _IOR(MYIOC_TYPE, GET_CUR_PROCS_OP, sizeof(int))
 
-#define GET_REMAINING_SPACE_OP 3
-#define ASGN1_GET_REMAINING_SPACE _IO(MYIOC_TYPE, GET_REMAINING_SPACE_OP)
+#define FREE_PAGES_OP 3
+#define ASGN1_FREE_PAGES _IO(MYIOC_TYPE, FREE_PAGES_OP)
 
 
 
@@ -162,17 +162,17 @@ int main (int argc, char **argv)
     }
     printf("nproc set to %d\n", nproc);
 
-    if ((proc_count = ioctl (fd, ASGN1_GET_CUR_PROCS)) < 0) {
+    if (ioctl (fd, ASGN1_GET_CUR_PROCS, &proc_count) < 0) {
         fprintf (stderr, "ioctl failed:  %s\n", strerror (errno));
         exit (1);
     }
     fprintf(stderr, "%ld process(es) using this module\n", proc_count);
 
-    if ((free_space = ioctl (fd, ASGN1_GET_REMAINING_SPACE)) < 0) {
+    if (ioctl (fd, ASGN1_FREE_PAGES) < 0) {
         fprintf (stderr, "ioctl failed:  %s\n", strerror (errno));
         exit (1);
     }
-    fprintf(stderr, "%ld space left in the module\n", free_space);
+    fprintf(stderr, "all pages freed\n");
 
     return 0;
 }
