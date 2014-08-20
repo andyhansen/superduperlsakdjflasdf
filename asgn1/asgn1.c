@@ -236,6 +236,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
    * them to the list of memory pages */
   while (asgn1_device.num_pages <= final_page_no) {
     curr = kmalloc(sizeof(page_node), GFP_KERNEL);
+    if (curr == NULL) return -ENOMEM;
     curr->page = alloc_page(GFP_KERNEL);
     if (NULL == curr->page) {
       printk(KERN_WARNING "Not enough memory left\n");
@@ -316,7 +317,8 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
     case GET_CUR_PROCS_OP:
       printk(KERN_WARNING "Getting number of pages allocated\n");
       pages_allocated = atomic_read(&asgn1_device.nprocs);
-      put_user(pages_allocated, (int *) arg);
+      result = put_user(pages_allocated, (int *) arg);
+      if (result) return -EINVAL;
       return 0;
     case FREE_PAGES_OP:
       printk(KERN_WARNING "Freeing all pages\n");
