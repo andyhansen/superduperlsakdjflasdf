@@ -17,8 +17,8 @@
 #define GET_CUR_PROCS_OP 2
 #define ASGN1_GET_CUR_PROCS _IOR(MYIOC_TYPE, GET_CUR_PROCS_OP, sizeof(int))
 
-#define FREE_PAGES_OP 3
-#define ASGN1_FREE_PAGES _IO(MYIOC_TYPE, FREE_PAGES_OP)
+#define RESET_DEVICE_OP 3
+#define ASGN1_RESET_DEVICE _IO(MYIOC_TYPE, RESET_DEVICE_OP)
 
 
 
@@ -168,7 +168,7 @@ int main (int argc, char **argv)
     }
     fprintf(stderr, "%ld process(es) using this module\n", proc_count);
 
-    if (ioctl (fd, ASGN1_FREE_PAGES) < 0) {
+    if (ioctl (fd, ASGN1_RESET_DEVICE) < 0) {
         fprintf (stderr, "ioctl failed:  %s\n", strerror (errno));
         exit (1);
     }

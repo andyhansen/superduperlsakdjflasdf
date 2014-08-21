@@ -302,8 +302,8 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 #define GET_CUR_PROCS_OP 2
 #define TEM_GET_CUR_PROCS _IOR(MYIOC_TYPE, GET_CUR_PROCS_OP, int)
 
-#define FREE_PAGES_OP 3
-#define TEM_FREE_PAGES _IO(MYIOC_TYPE, FREE_PAGES_OP)
+#define RESET_DEVICE_OP 3
+#define TEM_RESET_DEVICE _IO(MYIOC_TYPE, FREE_PAGES_OP)
 
 /**
  * The ioctl function, which nothing needs to be done in this case.
@@ -342,7 +342,7 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
         return -EINVAL;
       }
       return 0;
-    case FREE_PAGES_OP:
+    case RESET_DEVICE_OP:
       if (atomic_read(&asgn1_device.nprocs) > 1) return -EINVAL;
       free_memory_pages();
       return 0;
@@ -362,8 +362,11 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
 int asgn1_read_procmem(char *buf, char **start, off_t offset, int count,
     int *eof, void *data) {
   int result;
-  /* 70 is the largest amount of space this print statement can take up */
-  if (60 > count) return -EINVAL;
+  /* 65 is the largest amount of space this print statement can take up */
+  if (60 > count) {
+    printk(KERN_WARNING "%s: Buffer provided needs to have 60 or more bytes of space\n", MYDEV_NAME);
+    return -EINVAL;
+  }
   result =
       sprintf(buf, "Bytes written: %d, Total allocated space in bytes: %ld\n",
       asgn1_device.data_size, PAGE_SIZE * asgn1_device.num_pages);
@@ -373,7 +376,7 @@ int asgn1_read_procmem(char *buf, char **start, off_t offset, int count,
 
 
 /**
- * 
+ * Creates a new mapping in the virtual address space of the calling process.
  */
 static int asgn1_mmap (struct file *filp, struct vm_area_struct *vma)
 {
@@ -460,6 +463,7 @@ int __init asgn1_init_module(void){
 
   asgn1_device.class = class_create(THIS_MODULE, MYDEV_NAME);
   if (IS_ERR(asgn1_device.class)) {
+    printk(KERN_WARNING "%s: can't create class\n", MYDEV_NAME);
     result = -ENOMEM;
     goto fail_class;
   }
@@ -488,8 +492,6 @@ fail_cdev:
 fail_dev:
   /* unregister device */
   unregister_chrdev_region(asgn1_device.dev, asgn1_dev_count);
-
-  //printk(KERN_WARNING "%s: failed mounting\n", MYDEV_NAME);
   return result;
 }
 
