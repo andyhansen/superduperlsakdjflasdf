@@ -140,7 +140,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
   size_t size_read = 0;     /* size read from virtual disk in this function */
   size_t begin_offset;      /* the offset from the beginning of a page to
                                start reading */
-  int begin_page_no = *f_pos / PAGE_SIZE; /* the first page which contains
+  int begin_page_no = (*f_pos - 1) / PAGE_SIZE; /* the first page which contains
                                              the requested data */
 
   /* Subtract 1 to stop it from grabbing one extra page in the case that it
@@ -173,6 +173,9 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
           page_address(curr->page) + begin_offset,
           size_to_be_read);
 
+      /* Update the file position and the total amount read. If the copy was
+       * not successful then break out of the loop to prevent any more reads.
+       * The user can recall the read function to complete it. */
       curr_size_read = size_to_be_read - size_not_read;
       *f_pos += curr_size_read;
       size_read += curr_size_read;
@@ -277,7 +280,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
           buf + size_written,
           size_to_be_written);
 
-      /* Update the file position and the total amount written. If the write was
+      /* Update the file position and the total amount written. If the copy was
        * not successful then break out of the loop to prevent any more writes.
        * The user can recall the write function to complete it. */
       curr_size_written = size_to_be_written - size_not_written;
@@ -303,7 +306,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 #define TEM_GET_CUR_PROCS _IOR(MYIOC_TYPE, GET_CUR_PROCS_OP, int)
 
 #define RESET_DEVICE_OP 3
-#define TEM_RESET_DEVICE _IO(MYIOC_TYPE, FREE_PAGES_OP)
+#define TEM_RESET_DEVICE _IO(MYIOC_TYPE, RESET_DEVICE_OP)
 
 /**
  * The ioctl function, which nothing needs to be done in this case.
