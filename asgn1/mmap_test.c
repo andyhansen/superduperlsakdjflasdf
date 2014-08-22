@@ -94,7 +94,6 @@ int main (int argc, char **argv)
     char *buf, *read_buf, *mmap_buf, *filename = "/dev/asgn1";
     int nproc = 12345;
     long proc_count;
-    long free_space;
 
     srandom (getpid ());
 
