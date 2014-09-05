@@ -27,7 +27,9 @@
 #include <linux/kthread.h>
 #include <linux/slab.h>
 
-#define SHARED_IRQ 19
+//#define SHARED_IRQ 19
+#define SHARED_IRQ 32
+
 static int irq = SHARED_IRQ;
 module_param(irq, int, S_IRUGO);
 

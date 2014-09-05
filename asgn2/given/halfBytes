@@ -1,0 +1,12 @@
+#!/bin/bash
+for i in {1..15}
+do
+  sudo ./sendhalfbyte $i
+  sleep 1
+done
+for i in {15..1}
+do
+  sudo ./sendhalfbyte $i
+  sleep 1
+done
+sudo ./sendhalfbyte 0

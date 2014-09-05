@@ -60,6 +60,8 @@ static void t_fun(unsigned long t_arg)
 	atomic_inc(&counter_bh);
 
 
+	printk(KERN_INFO "I am in t_fun, jiffies = %ld\n", data->jiffies);
+	printk(KERN_INFO "counter_th is: %d\n", atomic_read(&counter_th));
 	/* COMPLETE ME */
 	/* print: counter_th, counter_bh and data->jiffies here */
 	/* END TRIM */
@@ -78,6 +80,7 @@ static irqreturn_t my_interrupt(int irq, void *dev_id)
 
 	/* COMPLETE ME */
 	/* schedule the tasklet here */
+  tasklet_schedule(&t_name);
 	/* END TRIM */
 
 

@@ -54,7 +54,6 @@ static struct my_dat {
 	struct work_struct work;
 } my_data;
 
-/* initialize workqueue */
 
 static void w_fun(struct work_struct *w_arg)
 {
@@ -64,6 +63,10 @@ static void w_fun(struct work_struct *w_arg)
 	       (int)current->pid);
 	printk(KERN_INFO " my data is: %d\n", atomic_read(&data->len));
 }
+
+/* initialize workqueue */
+DECLARE_WORK(w_name, w_fun);
+//INIT_WORK(&w_name, w_fun, &my_data->work);
 
 static ssize_t
 mycdrv_write(struct file *file, const char __user * buf, size_t lbuf,
@@ -77,6 +80,7 @@ mycdrv_write(struct file *file, const char __user * buf, size_t lbuf,
 
 	/* COMPLETE ME */
 	/* schedule the workqueue entry here */
+  schedule_work(&w_name);
 	/* END TRIM */
 
 
@@ -100,6 +104,7 @@ static int __init my_init(void)
 
 	/* COMPLETE ME */
 	/* initialize the workqueue here */
+  //data->work = create_workqueue(&w_name);
 	/* END TRIM */
 
 

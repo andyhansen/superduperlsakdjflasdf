@@ -1,0 +1,4 @@
+kernel//home/pi/440/08/lab1_tasklet.ko
+kernel//home/pi/440/08/lab1_workqueue.ko
+kernel//home/pi/440/08/lab2_one_tasklet.ko
+kernel//home/pi/440/08/lab2_one_workqueue.ko

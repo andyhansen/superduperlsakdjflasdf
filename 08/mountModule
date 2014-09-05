@@ -1,0 +1,4 @@
+#!/bin/bash
+sudo rmmod $1
+sudo insmod "$1.ko"
+sudo chown pi:pi /dev/mycdrv
