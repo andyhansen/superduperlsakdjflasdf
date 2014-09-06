@@ -137,15 +137,7 @@ int asgn2_open(struct inode *inode, struct file *filp) {
  * in this case. 
  */
 int asgn2_release (struct inode *inode, struct file *filp) {
-  /* START SKELETON */
-  /* COMPLETE ME */
-  /**
-   * decrement process count
-   */
-  /* END SKELETON */
-  /* START TRIM */
   atomic_dec(&asgn2_device.nprocs);
-  /* END TRIM */
   return 0;
 }
 
@@ -383,17 +375,8 @@ irqreturn_t dummyport_interrupt(int irq, void *dev_id){
  */
 int asgn2_read_procmem(char *buf, char **start, off_t offset, int count,
 		     int *eof, void *data) {
-  /* stub */
   int result;
 
-  /* START SKELETON */
-  /* COMPLETE ME */
-  /**
-   * use snprintf to print some info to buf, up to size count
-   * set eof
-   */
-  /* END SKELETON */
-  /* START TRIM */
   result = snprintf(buf, count,
 	            "major = %d\nnumber of pages = %d\ndata size = %u\n"
                     "disk size = %d\nnprocs = %d\nmax_nprocs = %d\n",
@@ -403,7 +386,6 @@ int asgn2_read_procmem(char *buf, char **start, off_t offset, int count,
                     atomic_read(&asgn2_device.nprocs), 
                     atomic_read(&asgn2_device.max_nprocs)); 
   *eof = 1; /* end of file */
-  /* END TRIM */
   return result;
 }
 
@@ -424,18 +406,6 @@ static int irq_number = IRQ_NUMBER;
 int __init asgn2_init_module(void){
   int result; 
 
-  /* START SKELETON */
-  /* COMPLETE ME */
-  /**
-   * set nprocs and max_nprocs of the device
-   *
-   * allocate major number
-   * allocate cdev, and set ops and owner field 
-   * add cdev
-   * initialize the page list
-   * create proc entries
-   */
-  /* END SKELETON */
   /* START TRIM */
   atomic_set(&asgn2_device.nprocs, 0);
   atomic_set(&asgn2_device.max_nprocs, 1);
@@ -493,11 +463,9 @@ int __init asgn2_init_module(void){
  
   asgn2_device.class = class_create(THIS_MODULE, MYDEV_NAME);
   if (IS_ERR(asgn2_device.class)) {
-  /* START TRIM */
     printk(KERN_WARNING "%s: can't create udev class\n", MYDEV_NAME);
     result = -ENOMEM;
     goto fail_class;
-  /* END TRIM */
   }
 
   asgn2_device.device = device_create(asgn2_device.class, NULL, 
@@ -527,14 +495,6 @@ int __init asgn2_init_module(void){
   /* cleanup code called when any of the initialization steps fail */
 fail_device:
    class_destroy(asgn2_device.class);
-
-  /* START SKELETON */
-  /* COMPLETE ME */
-  /* PLEASE PUT YOUR CLEANUP CODE HERE, IN REVERSE ORDER OF ALLOCATION */
-
-  /* END SKELETON */
-  /* START TRIM */ 
-
 fail_class:
    kmem_cache_destroy(asgn2_device.cache);  
 fail_kmem_cache_create:
@@ -548,7 +508,6 @@ fail_gpio:
 fail_irq:
   free_irq(irq_number, asgn2_device.device);
   
-  /* END TRIM */
   return result;
 }
 
@@ -561,14 +520,6 @@ void __exit asgn2_exit_module(void){
   class_destroy(asgn2_device.class);
   printk(KERN_WARNING "cleaned up udev entry\n");
   
-  /* START SKELETON */
-  /* COMPLETE ME */
-  /**
-   * free all pages in the page list 
-   * cleanup in reverse order
-   */
-  /* END SKELETON */
-  /* START TRIM */
   free_memory_pages();
   kmem_cache_destroy(asgn2_device.cache);
   remove_proc_entry(MYDEV_NAME, NULL /* parent dir */);

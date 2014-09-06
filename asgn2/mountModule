@@ -1,5 +1,5 @@
 #!/bin/bash
 make
-sudo rmmod asgn1
-sudo insmod asgn1.ko
-sudo chown pi:pi /dev/asgn1
+sudo rmmod asgn2
+sudo insmod asgn2.ko
+sudo chown pi:pi /dev/asgn2
