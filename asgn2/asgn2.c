@@ -71,6 +71,7 @@ u8 top_half_byte;
 int second_half = 0;
 
 char circular_buffer[PAGE_SIZE];
+//char* circular_buffer = kmalloc(sizeof(char) * PAGE_SIZE);
 int write_pos = 0;
 int read_pos = 0;
 
@@ -333,11 +334,14 @@ int add_to_buffer(char to_add) {
   return 1;
 }
 
-char remove_from_buffer(void) {
-  char to_return = circular_buffer[read_pos];
-  read_pos = read_pos + 1 % PAGE_SIZE;
-  return to_return;
+void remove_from_buffer(char buf[]) {
+  char to_return = buf[read_pos];
+  //read_pos = read_pos + 1 % PAGE_SIZE;
+  //return to_return;
+  //return 'a';
 }
+
+//DECLARE_TASKLET(t_name, remove_from_buffer, &circular_buffer);
 
 void get_half_byte(void){
   u8 this_half_byte = read_half_byte();
@@ -346,11 +350,11 @@ void get_half_byte(void){
 
   if (second_half) {
     full_byte = (char) top_half_byte << 4 | this_half_byte;
-    //printk(KERN_WARNING "The byte is %c\n", full_byte);
+    printk(KERN_WARNING "The byte is %c\n", full_byte);
     second_half = 0;
     // add full byte to the circular buffer
     add_to_buffer(full_byte);
-    printk(KERN_WARNING "The byte is %c\n", remove_from_buffer());
+    //printk(KERN_WARNING "The byte is %c\n", remove_from_buffer());
   } else {
     //printk(KERN_WARNING "read first half\n");
     top_half_byte = this_half_byte;
