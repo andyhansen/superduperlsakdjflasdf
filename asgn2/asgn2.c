@@ -67,6 +67,12 @@ int asgn2_major = 0;                      /* major number of module */
 int asgn2_minor = 0;                      /* minor number of module */
 int asgn2_dev_count = 1;                  /* number of devices */
 
+u8 top_half_byte;
+int second_half = 0;
+
+char circular_buffer[PAGE_SIZE];
+int write_pos = 0;
+int read_pos = 0;
 
 /**
  * This function frees all memory pages held by the module.
@@ -74,20 +80,6 @@ int asgn2_dev_count = 1;                  /* number of devices */
 void free_memory_pages(void) {
   page_node *curr;
 
-  /* START SKELETON */
-  /* COMPLETE ME */
-  /**
-   * Loop through the entire page list {
-   *   if (node has a page) {
-   *     free the page
-   *   }
-   *   remove the node from the page list
-   *   free the node
-   * }
-   * reset device data size, and num_pages
-   */  
-  /* END SKELETON */
-  /* START TRIM */
   while (!list_empty(&asgn2_device.mem_list)) {
     curr = list_entry(asgn2_device.mem_list.next, page_node, list);
     if (NULL != curr->page) __free_page(curr->page);
@@ -106,16 +98,6 @@ void free_memory_pages(void) {
  * mode, all memory pages will be freed.
  */
 int asgn2_open(struct inode *inode, struct file *filp) {
-  /* START SKELETON */
-  /* COMPLETE ME */
-  /**
-   * Increment process count, if exceeds max_nprocs, return -EBUSY
-   *
-   * if opened in write-only mode, free all memory pages
-   *
-   */
-  /* END SKELETON */
-  /* START TRIM */
   if (atomic_read(&asgn2_device.nprocs) >= atomic_read(&asgn2_device.max_nprocs)) {
     return -EBUSY;
   }
@@ -125,8 +107,6 @@ int asgn2_open(struct inode *inode, struct file *filp) {
   if ((filp->f_mode & FMODE_WRITE) && !(filp->f_mode & FMODE_READ)) {
     free_memory_pages();
   }
-  /* END TRIM */
-
 
   return 0; /* success */
 }
@@ -315,19 +295,7 @@ long asgn2_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
   int new_nprocs;
   int result;
 
-  /* START SKELETON */
-  /* COMPLETE ME */
-  /** 
-   * check whether cmd is for our device, if not for us, return -EINVAL 
-   *
-   * get command, and if command is SET_NPROC_OP, then get the data, and
-     set max_nprocs accordingly, don't forget to check validity of the 
-     value before setting max_nprocs
-   */
-  /* END SKELETON */
-  /* START TRIM */
   if (_IOC_TYPE(cmd) != MYIOC_TYPE) {
-
     printk(KERN_WARNING "%s: magic number does not match\n", MYDEV_NAME);
     return -EINVAL;
   }
@@ -354,18 +322,49 @@ long asgn2_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
             __stringify (KBUILD_BASENAME), atomic_read(&asgn2_device.max_nprocs));
     return 0;
   } 
-  /* END TRIM */                       
 
   return -ENOTTY;
 }
 
-void u8_to_u16(){
-  printk(KERN_WARNING "The half byte is %u\n",read_half_byte());
+int add_to_buffer(char to_add) {
+  // check buffer is not full
+  circular_buffer[write_pos] = to_add;
+  write_pos = write_pos + 1 % PAGE_SIZE;
+  return 1;
+}
+
+char remove_from_buffer(void) {
+  char to_return = circular_buffer[read_pos];
+  read_pos = read_pos + 1 % PAGE_SIZE;
+  return to_return;
+}
+
+void get_half_byte(void){
+  u8 this_half_byte = read_half_byte();
+  char full_byte;
+  //printk(KERN_WARNING "The half byte is %u\n", this_half_byte);
+
+  if (second_half) {
+    full_byte = (char) top_half_byte << 4 | this_half_byte;
+    //printk(KERN_WARNING "The byte is %c\n", full_byte);
+    second_half = 0;
+    // add full byte to the circular buffer
+    add_to_buffer(full_byte);
+    printk(KERN_WARNING "The byte is %c\n", remove_from_buffer());
+  } else {
+    //printk(KERN_WARNING "read first half\n");
+    top_half_byte = this_half_byte;
+    second_half = 1;
+  }
+  /* check flag, either store the byte, or read the first half and set 
+   * the flag 
+   * w = a << 4 | b
+   * */
 }
 
 irqreturn_t dummyport_interrupt(int irq, void *dev_id){
-  printk(KERN_WARNING "Got the interrupt\n");
-  u8_to_u16();
+  //printk(KERN_WARNING "Got the interrupt\n");
+  get_half_byte();
   return 0;
 }
 
