@@ -24,7 +24,6 @@ __attribute__((section("__versions"))) = {
 	{ 0x74738f6d, "cdev_del" },
 	{ 0x620805df, "remove_proc_entry" },
 	{ 0x263940d7, "kmem_cache_destroy" },
-	{ 0xd197d610, "kmem_cache_alloc" },
 	{ 0x85305f03, "class_destroy" },
 	{ 0x148887b7, "device_create" },
 	{ 0xb4c75863, "__class_create" },
@@ -34,6 +33,11 @@ __attribute__((section("__versions"))) = {
 	{ 0x9d0d02cf, "cdev_alloc" },
 	{ 0x29537c9e, "alloc_chrdev_region" },
 	{ 0xfaef0ed, "__tasklet_schedule" },
+	{ 0x30407f, "contig_page_data" },
+	{ 0x2da2b3ae, "__alloc_pages_nodemask" },
+	{ 0xd197d610, "kmem_cache_alloc" },
+	{ 0xfa2a45e, "__memzero" },
+	{ 0xfbc74f64, "__copy_from_user" },
 	{ 0x2875e14d, "kmem_cache_free" },
 	{ 0x969267bd, "__free_pages" },
 	{ 0xf20dabd8, "free_irq" },
@@ -48,6 +52,7 @@ __attribute__((section("__versions"))) = {
 	{ 0xb81960ca, "snprintf" },
 	{ 0x353e3fa5, "__get_user_4" },
 	{ 0x27e1a049, "printk" },
+	{ 0xff178f6, "__aeabi_idivmod" },
 	{ 0xefd6cf06, "__aeabi_unwind_cpp_pr0" },
 };
 
@@ -57,4 +62,4 @@ __attribute__((section(".modinfo"))) =
 "depends=";
 
 
-MODULE_INFO(srcversion, "9DC7092896435A85BC995C0");
+MODULE_INFO(srcversion, "8384414B2FBD336A4F67DDF");

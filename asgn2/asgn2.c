@@ -53,8 +53,8 @@ typedef struct asgn1_dev_t {
   struct list_head mem_list; 
   int num_pages;        /* number of memory pages this module currently holds */
   size_t data_size;     /* total data size in this module */
-  long read;
-  long write;
+  long read_pos;
+  long write_pos;
   atomic_t nprocs;      /* number of processes accessing this device */ 
   atomic_t max_nprocs;  /* max number of processes accessing this device */
   struct kmem_cache *cache;      /* cache memory */
@@ -62,11 +62,12 @@ typedef struct asgn1_dev_t {
   struct device *device;   /* the udev device node */
 } asgn2_dev;
 
-//char circular_buffer[PAGE_SIZE];
 struct cbuf_t {
-  char* buf; // = kmalloc(sizeof(char) * PAGE_SIZE);
+  char* buf;
   int write_pos;
   int read_pos;
+  int size;
+  int capacity;
 } cbuf;
 
 asgn2_dev asgn2_device;
@@ -94,8 +95,6 @@ void free_memory_pages(void) {
   }
   asgn2_device.data_size = 0;
   asgn2_device.num_pages = 0;
-  /* END TRIM */
-
 }
 
 
@@ -107,16 +106,12 @@ int asgn2_open(struct inode *inode, struct file *filp) {
   if (atomic_read(&asgn2_device.nprocs) >= atomic_read(&asgn2_device.max_nprocs)) {
     return -EBUSY;
   }
-
   atomic_inc(&asgn2_device.nprocs);
-
   if ((filp->f_mode & FMODE_WRITE) && !(filp->f_mode & FMODE_READ)) {
     free_memory_pages();
   }
-
   return 0; /* success */
 }
-
 
 /**
  * This function releases the virtual disk, but nothing needs to be done
@@ -335,17 +330,21 @@ long asgn2_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
 void remove_from_cbuffer(unsigned long t_arg) {
   //put in checks
   char to_return = cbuf.buf[cbuf.read_pos];
-  cbuf.read_pos = cbuf.read_pos + 1 % PAGE_SIZE;
+  cbuf.read_pos = cbuf.read_pos + 1 % cbuf.capacity;
   printk(KERN_WARNING "tasklet got %c\n", to_return);
 }
 
 DECLARE_TASKLET(t_name, remove_from_cbuffer, (unsigned long) &cbuf);
 
-void add_to_cbuffer(char to_add) {
+int add_to_cbuffer(char to_add) {
   // check buffer is not full
+  if (cbuf.capacity == cbuf.size) {
+    return -ENOMEM;
+  }
   cbuf.buf[cbuf.write_pos] = to_add;
-  cbuf.write_pos = cbuf.write_pos + 1 % PAGE_SIZE;
+  cbuf.write_pos = cbuf.write_pos + 1 % cbuf.capacity;
   tasklet_schedule(&t_name);
+  return 0;
 }
 
 void get_half_byte(void){
@@ -417,6 +416,8 @@ int __init asgn2_init_module(void){
   /* START TRIM */
   atomic_set(&asgn2_device.nprocs, 0);
   atomic_set(&asgn2_device.max_nprocs, 1);
+  asgn2_device.read_pos = 0;
+  asgn2_device.write_pos = 0;
 
   result = alloc_chrdev_region(&asgn2_device.dev, asgn2_minor, 
                                asgn2_dev_count, MYDEV_NAME);
@@ -496,13 +497,15 @@ int __init asgn2_init_module(void){
     goto fail_irq;
   }
 
-  if (NULL == (cbuf.buf = kmalloc(sizeof(char) * PAGE_SIZE, GFP_KERNEL))) {
+  cbuf.write_pos = 0;
+  cbuf.read_pos = 0;
+  cbuf.size = 0;
+  cbuf.capacity = PAGE_SIZE;
+  if (NULL == (cbuf.buf = kmalloc(sizeof(char) * cbuf.capacity, GFP_KERNEL))) {
     printk(KERN_WARNING "%s: Unable allocate cicular buffer memory\n", MYDEV_NAME);
     result = -ENOMEM;
     goto fail_irq;
   }
-  cbuf.write_pos = 0;
-  cbuf.read_pos = 0;
   
   printk(KERN_WARNING "set up udev entry\n");
   printk(KERN_WARNING "Hello world from %s\n", MYDEV_NAME);
