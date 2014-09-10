@@ -53,12 +53,21 @@ typedef struct asgn1_dev_t {
   struct list_head mem_list; 
   int num_pages;        /* number of memory pages this module currently holds */
   size_t data_size;     /* total data size in this module */
+  long read;
+  long write;
   atomic_t nprocs;      /* number of processes accessing this device */ 
   atomic_t max_nprocs;  /* max number of processes accessing this device */
   struct kmem_cache *cache;      /* cache memory */
   struct class *class;     /* the udev class */
   struct device *device;   /* the udev device node */
 } asgn2_dev;
+
+//char circular_buffer[PAGE_SIZE];
+struct cbuf_t {
+  char* buf; // = kmalloc(sizeof(char) * PAGE_SIZE);
+  int write_pos;
+  int read_pos;
+} cbuf;
 
 asgn2_dev asgn2_device;
 
@@ -70,10 +79,6 @@ int asgn2_dev_count = 1;                  /* number of devices */
 u8 top_half_byte;
 int second_half = 0;
 
-char circular_buffer[PAGE_SIZE];
-//char* circular_buffer = kmalloc(sizeof(char) * PAGE_SIZE);
-int write_pos = 0;
-int read_pos = 0;
 
 /**
  * This function frees all memory pages held by the module.
@@ -327,21 +332,21 @@ long asgn2_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
   return -ENOTTY;
 }
 
-int add_to_buffer(char to_add) {
+void remove_from_cbuffer(unsigned long t_arg) {
+  //put in checks
+  char to_return = cbuf.buf[cbuf.read_pos];
+  cbuf.read_pos = cbuf.read_pos + 1 % PAGE_SIZE;
+  printk(KERN_WARNING "tasklet got %c\n", to_return);
+}
+
+DECLARE_TASKLET(t_name, remove_from_cbuffer, (unsigned long) &cbuf);
+
+void add_to_cbuffer(char to_add) {
   // check buffer is not full
-  circular_buffer[write_pos] = to_add;
-  write_pos = write_pos + 1 % PAGE_SIZE;
-  return 1;
+  cbuf.buf[cbuf.write_pos] = to_add;
+  cbuf.write_pos = cbuf.write_pos + 1 % PAGE_SIZE;
+  tasklet_schedule(&t_name);
 }
-
-void remove_from_buffer(char buf[]) {
-  char to_return = buf[read_pos];
-  //read_pos = read_pos + 1 % PAGE_SIZE;
-  //return to_return;
-  //return 'a';
-}
-
-//DECLARE_TASKLET(t_name, remove_from_buffer, &circular_buffer);
 
 void get_half_byte(void){
   u8 this_half_byte = read_half_byte();
@@ -353,7 +358,7 @@ void get_half_byte(void){
     printk(KERN_WARNING "The byte is %c\n", full_byte);
     second_half = 0;
     // add full byte to the circular buffer
-    add_to_buffer(full_byte);
+    add_to_cbuffer(full_byte);
     //printk(KERN_WARNING "The byte is %c\n", remove_from_buffer());
   } else {
     //printk(KERN_WARNING "read first half\n");
@@ -490,6 +495,14 @@ int __init asgn2_init_module(void){
     result = -ENOMEM;
     goto fail_irq;
   }
+
+  if (NULL == (cbuf.buf = kmalloc(sizeof(char) * PAGE_SIZE, GFP_KERNEL))) {
+    printk(KERN_WARNING "%s: Unable allocate cicular buffer memory\n", MYDEV_NAME);
+    result = -ENOMEM;
+    goto fail_irq;
+  }
+  cbuf.write_pos = 0;
+  cbuf.read_pos = 0;
   
   printk(KERN_WARNING "set up udev entry\n");
   printk(KERN_WARNING "Hello world from %s\n", MYDEV_NAME);
