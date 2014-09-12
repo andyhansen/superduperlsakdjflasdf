@@ -76,14 +76,12 @@ struct cbuf_t {
 
 asgn2_dev asgn2_device;
 
-
 int asgn2_major = 0;                      /* major number of module */  
 int asgn2_minor = 0;                      /* minor number of module */
 int asgn2_dev_count = 1;                  /* number of devices */
 
 u8 top_half_byte;
 int second_half = 0;
-
 
 /**
  * This function frees all memory pages held by the module.
@@ -247,6 +245,7 @@ ssize_t asgn2_write(char* to_write, int count) {
       ptr = ptr->next;
     }
   }
+  printk(KERN_WARNING "Tail offset is %d\n", asgn2_device.tail.offset);
   asgn2_device.data_size = asgn2_device.tail.offset - asgn2_device.head.offset;
   return size_written;
 }
@@ -296,14 +295,22 @@ long asgn2_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
 void remove_from_cbuffer(unsigned long t_arg) {
   /* Get either the whole cbuf in one go, or pass it in two goes */
   int returned, count = 0;
-  while (cbuf.count > 0) {
+  do {
     if (cbuf.head + cbuf.count < cbuf.capacity) count = cbuf.count;
-    else count = cbuf.capacity - cbuf.head;
+    else {
+      count = cbuf.capacity - cbuf.head;
+      printk(KERN_WARNING "buffer past the thing\n");
+      printk(KERN_WARNING "count in the cbuffer is %d\n", cbuf.count);
+      printk(KERN_WARNING "writing %d bytes from %d to %d\n", count,
+                                         cbuf.head, cbuf.head + count);
+      printk(KERN_WARNING "head is at %d\n", cbuf.head);
+      return; /*TODO: GET THIS WORKING WITHOUT BREAKING */
+    }
 
     returned = asgn2_write(&cbuf.buf[cbuf.head], count);
     cbuf.count -= returned;
     cbuf.head = cbuf.head + returned % cbuf.capacity;
-  }
+  } while (cbuf.count > 0);
   //printk(KERN_WARNING "took %d bytes from the circular buffer\n", count);
 }
 
@@ -387,9 +394,9 @@ int __init asgn2_init_module(void){
   atomic_set(&asgn2_device.nprocs, 0);
   atomic_set(&asgn2_device.max_nprocs, 1);
   asgn2_device.head.page_no = 0;
-  asgn2_device.head.offset = 0;
+  asgn2_device.head.offset = 1;
   asgn2_device.tail.page_no = 0;
-  asgn2_device.tail.offset = 0;
+  asgn2_device.tail.offset = 1;
 
   result = alloc_chrdev_region(&asgn2_device.dev, asgn2_minor,
                                asgn2_dev_count, MYDEV_NAME);
