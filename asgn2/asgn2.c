@@ -64,9 +64,8 @@ typedef struct asgn1_dev_t {
 
 struct cbuf_t {
   char* buf;
-  int write_pos;
-  int read_pos;
-  int size;
+  int head;
+  int count;
   int capacity;
 } cbuf;
 
@@ -141,26 +140,6 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
   struct list_head *ptr = asgn2_device.mem_list.next;
   page_node *curr;
 
-  /* START SKELETON */
-  /* COMPLETE ME */
-  /**
-   * check f_pos, if beyond data_size, return 0
-   * 
-   * Traverse the list, once the first requested page is reached,
-   *   - use copy_to_user to copy the data to the user-space buf page by page
-   *   - you also need to work out the start / end offset within a page
-   *   - Also needs to handle the situation where copy_to_user copy less
-   *       data than requested, and
-   *       copy_to_user should be called again to copy the rest of the
-   *       unprocessed data, and the second and subsequent calls still
-   *       need to check whether copy_to_user copies all data requested.
-   *       This is best done by a while / do-while loop.
-   *
-   * if end of data area of ramdisk reached before copying the requested
-   *   return the size copied to the user space so far
-   */
-  /* END SKELETON */
-  /* START TRIM */
   if (*f_pos >= asgn2_device.data_size) return 0;
   count = min(asgn2_device.data_size - (size_t)*f_pos, count);
 
@@ -198,8 +177,6 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
       ptr = ptr->next;
     }
   }
-  /* END TRIM */
-
   return size_read;
 }
 
@@ -207,13 +184,12 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
  * This function writes from the user buffer to the virtual disk of this
  * module
  */
-ssize_t asgn2_write(struct file *filp, const char __user *buf, size_t count,
-		  loff_t *f_pos) {
-  size_t orig_f_pos = *f_pos;  /* the original file position */
+ssize_t asgn2_write(char to_write) {
+  size_t orig_f_pos = asgn2_device.write_pos;  /* the original file position */
   size_t size_written = 0;  /* size written to virtual disk in this function */
   size_t begin_offset;      /* the offset from the beginning of a page to
 			       start writing */
-  int begin_page_no = *f_pos / PAGE_SIZE;  /* the first page this finction
+  int begin_page_no = asgn2_device.write_pos / PAGE_SIZE;  /* the first page this finction
 					      should start writing to */
 
   int curr_page_no = 0;     /* the current page number */
@@ -224,18 +200,7 @@ ssize_t asgn2_write(struct file *filp, const char __user *buf, size_t count,
   struct list_head *ptr = asgn2_device.mem_list.next;
   page_node *curr;
 
-  /* START SKELETON */
-  /* COMPLETE ME */
-  /**
-   * Traverse the list until the first page reached, and add nodes if necessary
-   *
-   * Then write the data page by page, remember to handle the situation
-   *   when copy_from_user() writes less than the amount you requested.
-   *   a while loop / do-while loop is recommended to handle this situation.
-   */
-  /* END SKELETON */
-  /* START TRIM */
-  while (size_written < count) {
+  while (size_written < 1) {
     curr = list_entry(ptr, page_node, list);
     if (ptr == &asgn2_device.mem_list) {
       /* not enough page, so add page */
@@ -260,16 +225,17 @@ ssize_t asgn2_write(struct file *filp, const char __user *buf, size_t count,
       curr_page_no++;
     } else {
       /* this is the page to write to */
-      begin_offset = *f_pos % PAGE_SIZE;
-      size_to_be_written = (size_t)min((size_t)(count - size_written),
-				       (size_t)(PAGE_SIZE - begin_offset));
+      begin_offset = asgn2_device.write_pos % PAGE_SIZE;
+      size_to_be_written = 1;
       do {
-        curr_size_written = size_to_be_written -
+        curr_size_written = 1; /*size_to_be_written -
 	  copy_from_user(page_address(curr->page) + begin_offset,
-	  	         buf + size_written, size_to_be_written);
+	  	         buf + size_written, size_to_be_written);*/
+        memmove(page_address(curr->page) + begin_offset,
+	  	         &to_write, 1);
         size_written += curr_size_written;
         begin_offset += curr_size_written;
-        *f_pos += curr_size_written;
+        asgn2_device.write_pos += curr_size_written;
         size_to_be_written -= curr_size_written;
       } while (size_to_be_written > 0);
       curr_page_no++;
@@ -329,20 +295,22 @@ long asgn2_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
 
 void remove_from_cbuffer(unsigned long t_arg) {
   //put in checks
-  char to_return = cbuf.buf[cbuf.read_pos];
-  cbuf.read_pos = cbuf.read_pos + 1 % cbuf.capacity;
+  char to_return = cbuf.buf[cbuf.head];
   printk(KERN_WARNING "tasklet got %c\n", to_return);
+  cbuf.head = cbuf.head + 1 % cbuf.capacity;
+  cbuf.count--;
+  //asgn2_write(to_return);
 }
 
 DECLARE_TASKLET(t_name, remove_from_cbuffer, (unsigned long) &cbuf);
 
 int add_to_cbuffer(char to_add) {
   // check buffer is not full
-  if (cbuf.capacity == cbuf.size) {
+  if (cbuf.capacity == cbuf.count) {
     return -ENOMEM;
   }
-  cbuf.buf[cbuf.write_pos] = to_add;
-  cbuf.write_pos = cbuf.write_pos + 1 % cbuf.capacity;
+  cbuf.buf[(cbuf.head + cbuf.count) % cbuf.capacity] = to_add;
+  cbuf.count++;
   tasklet_schedule(&t_name);
   return 0;
 }
@@ -419,7 +387,7 @@ int __init asgn2_init_module(void){
   asgn2_device.read_pos = 0;
   asgn2_device.write_pos = 0;
 
-  result = alloc_chrdev_region(&asgn2_device.dev, asgn2_minor, 
+  result = alloc_chrdev_region(&asgn2_device.dev, asgn2_minor,
                                asgn2_dev_count, MYDEV_NAME);
 
   if (result < 0) {
@@ -497,9 +465,8 @@ int __init asgn2_init_module(void){
     goto fail_irq;
   }
 
-  cbuf.write_pos = 0;
-  cbuf.read_pos = 0;
-  cbuf.size = 0;
+  cbuf.head = 0;
+  cbuf.count = 0;
   cbuf.capacity = PAGE_SIZE;
   if (NULL == (cbuf.buf = kmalloc(sizeof(char) * cbuf.capacity, GFP_KERNEL))) {
     printk(KERN_WARNING "%s: Unable allocate cicular buffer memory\n", MYDEV_NAME);
@@ -546,9 +513,7 @@ void __exit asgn2_exit_module(void){
   unregister_chrdev_region(asgn2_device.dev, asgn2_dev_count);
   gpio_dummy_exit();
   free_irq(irq_number, asgn2_device.device);
-  
-
-  /* END TRIM */
+  kfree(cbuf.buf);
   printk(KERN_WARNING "Good bye from %s\n", MYDEV_NAME);
 }
 

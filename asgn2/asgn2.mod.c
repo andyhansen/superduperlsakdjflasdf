@@ -18,6 +18,7 @@ static const struct modversion_info ____versions[]
 __used
 __attribute__((section("__versions"))) = {
 	{ 0xda9e78e9, "module_layout" },
+	{ 0x37a0cba, "kfree" },
 	{ 0x4b8b420c, "device_destroy" },
 	{ 0xeed38436, "malloc_sizes" },
 	{ 0x7485e15e, "unregister_chrdev_region" },
@@ -36,8 +37,6 @@ __attribute__((section("__versions"))) = {
 	{ 0x30407f, "contig_page_data" },
 	{ 0x2da2b3ae, "__alloc_pages_nodemask" },
 	{ 0xd197d610, "kmem_cache_alloc" },
-	{ 0xfa2a45e, "__memzero" },
-	{ 0xfbc74f64, "__copy_from_user" },
 	{ 0x2875e14d, "kmem_cache_free" },
 	{ 0x969267bd, "__free_pages" },
 	{ 0xf20dabd8, "free_irq" },
@@ -62,4 +61,4 @@ __attribute__((section(".modinfo"))) =
 "depends=";
 
 
-MODULE_INFO(srcversion, "8384414B2FBD336A4F67DDF");
+MODULE_INFO(srcversion, "AAD80637AFC5DBB8E5B14EC");
