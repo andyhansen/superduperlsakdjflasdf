@@ -47,14 +47,19 @@ typedef struct page_node_rec {
   struct page *page;
 } page_node;
 
+struct index {
+  int page_no;
+  int offset;
+};
+
 typedef struct asgn1_dev_t {
   dev_t dev;            /* the device */
   struct cdev *cdev;
   struct list_head mem_list; 
   int num_pages;        /* number of memory pages this module currently holds */
   size_t data_size;     /* total data size in this module */
-  long read_pos;
-  long write_pos;
+  struct index head;
+  struct index tail;
   atomic_t nprocs;      /* number of processes accessing this device */ 
   atomic_t max_nprocs;  /* max number of processes accessing this device */
   struct kmem_cache *cache;      /* cache memory */
@@ -184,12 +189,12 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
  * This function writes from the user buffer to the virtual disk of this
  * module
  */
-ssize_t asgn2_write(char to_write) {
-  size_t orig_f_pos = asgn2_device.write_pos;  /* the original file position */
+ssize_t asgn2_write(char* to_write, int count) {
   size_t size_written = 0;  /* size written to virtual disk in this function */
   size_t begin_offset;      /* the offset from the beginning of a page to
 			       start writing */
-  int begin_page_no = asgn2_device.write_pos / PAGE_SIZE;  /* the first page this finction
+  int begin_page_no = asgn2_device.tail.offset / PAGE_SIZE;  
+  /* the first page this finction
 					      should start writing to */
 
   int curr_page_no = 0;     /* the current page number */
@@ -199,8 +204,9 @@ ssize_t asgn2_write(char to_write) {
   
   struct list_head *ptr = asgn2_device.mem_list.next;
   page_node *curr;
+  printk(KERN_WARNING "writing %d bytes\n", count);
 
-  while (size_written < 1) {
+  while (size_written < count) {
     curr = list_entry(ptr, page_node, list);
     if (ptr == &asgn2_device.mem_list) {
       /* not enough page, so add page */
@@ -224,30 +230,24 @@ ssize_t asgn2_write(char to_write) {
       ptr = ptr->next;
       curr_page_no++;
     } else {
-      /* this is the page to write to */
-      begin_offset = asgn2_device.write_pos % PAGE_SIZE;
-      size_to_be_written = 1;
       do {
-        curr_size_written = 1; /*size_to_be_written -
-	  copy_from_user(page_address(curr->page) + begin_offset,
-	  	         buf + size_written, size_to_be_written);*/
+      /* this is the page to write to */
+        begin_offset = asgn2_device.tail.offset % PAGE_SIZE;
+        size_to_be_written = (size_t)min((size_t)(count - size_written),
+				       (size_t)(PAGE_SIZE - begin_offset));
+        curr_size_written = size_to_be_written;
         memmove(page_address(curr->page) + begin_offset,
-	  	         &to_write, 1);
+	  	         to_write + size_written, size_to_be_written);
         size_written += curr_size_written;
         begin_offset += curr_size_written;
-        asgn2_device.write_pos += curr_size_written;
+        asgn2_device.tail.offset += curr_size_written;
         size_to_be_written -= curr_size_written;
       } while (size_to_be_written > 0);
       curr_page_no++;
       ptr = ptr->next;
     }
   }
-
-  /* END TRIM */
-
-
-  asgn2_device.data_size = max(asgn2_device.data_size,
-                               orig_f_pos + size_written);
+  asgn2_device.data_size = asgn2_device.tail.offset - asgn2_device.head.offset;
   return size_written;
 }
 
@@ -294,12 +294,17 @@ long asgn2_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
 }
 
 void remove_from_cbuffer(unsigned long t_arg) {
-  //put in checks
-  char to_return = cbuf.buf[cbuf.head];
-  printk(KERN_WARNING "tasklet got %c\n", to_return);
-  cbuf.head = cbuf.head + 1 % cbuf.capacity;
-  cbuf.count--;
-  //asgn2_write(to_return);
+  /* Get either the whole cbuf in one go, or pass it in two goes */
+  int returned, count = 0;
+  while (cbuf.count > 0) {
+    if (cbuf.head + cbuf.count < cbuf.capacity) count = cbuf.count;
+    else count = cbuf.capacity - cbuf.head;
+
+    returned = asgn2_write(&cbuf.buf[cbuf.head], count);
+    cbuf.count -= returned;
+    cbuf.head = cbuf.head + returned % cbuf.capacity;
+  }
+  //printk(KERN_WARNING "took %d bytes from the circular buffer\n", count);
 }
 
 DECLARE_TASKLET(t_name, remove_from_cbuffer, (unsigned long) &cbuf);
@@ -311,7 +316,8 @@ int add_to_cbuffer(char to_add) {
   }
   cbuf.buf[(cbuf.head + cbuf.count) % cbuf.capacity] = to_add;
   cbuf.count++;
-  tasklet_schedule(&t_name);
+  if (to_add == '\0' || cbuf.capacity == cbuf.count)
+    tasklet_schedule(&t_name);
   return 0;
 }
 
@@ -322,7 +328,7 @@ void get_half_byte(void){
 
   if (second_half) {
     full_byte = (char) top_half_byte << 4 | this_half_byte;
-    printk(KERN_WARNING "The byte is %c\n", full_byte);
+    //printk(KERN_WARNING "The byte is %c\n", full_byte);
     second_half = 0;
     // add full byte to the circular buffer
     add_to_cbuffer(full_byte);
@@ -332,10 +338,6 @@ void get_half_byte(void){
     top_half_byte = this_half_byte;
     second_half = 1;
   }
-  /* check flag, either store the byte, or read the first half and set 
-   * the flag 
-   * w = a << 4 | b
-   * */
 }
 
 irqreturn_t dummyport_interrupt(int irq, void *dev_id){
@@ -384,8 +386,10 @@ int __init asgn2_init_module(void){
   /* START TRIM */
   atomic_set(&asgn2_device.nprocs, 0);
   atomic_set(&asgn2_device.max_nprocs, 1);
-  asgn2_device.read_pos = 0;
-  asgn2_device.write_pos = 0;
+  asgn2_device.head.page_no = 0;
+  asgn2_device.head.offset = 0;
+  asgn2_device.tail.page_no = 0;
+  asgn2_device.tail.offset = 0;
 
   result = alloc_chrdev_region(&asgn2_device.dev, asgn2_minor,
                                asgn2_dev_count, MYDEV_NAME);
