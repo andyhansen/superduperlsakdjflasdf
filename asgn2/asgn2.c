@@ -137,11 +137,13 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
   int begin_page_no = *f_pos / PAGE_SIZE; /* the first page which contains
 					     the requested data */
   int curr_page_no = 0;     /* the current page number */
+  int curr_del_page_no = 0;     /* the current page number */
   size_t curr_size_read;    /* size read from the virtual disk in this round */
   size_t size_to_be_read;   /* size to be read in the current round in 
 			       while loop */
 
   struct list_head *ptr = asgn2_device.mem_list.next;
+  struct list_head *tmp;
   page_node *curr;
 
   if (*f_pos >= asgn2_device.data_size) return 0;
@@ -173,14 +175,34 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
 		       size_to_be_read);
         size_read += curr_size_read;
         *f_pos += curr_size_read;
+        asgn2_device.head.offset += curr_size_read;
         begin_offset += curr_size_read;
         size_to_be_read -= curr_size_read;
+        printk(KERN_WARNING "Curr size read %d\n", curr_size_read);
+        printk(KERN_WARNING "head pos %d\n", asgn2_device.head.offset);
       } while (curr_size_read > 0);
+      printk(KERN_WARNING "left the loop\n");
 
       curr_page_no++;
       ptr = ptr->next;
+      printk(KERN_WARNING "Head offset is now %d\n", asgn2_device.head.offset);
+      if (asgn2_device.head.offset % PAGE_SIZE == 1) {
+        //curr = list_entry(asgn2_device.mem_list.next, page_node, list);
+        if (NULL != curr->page) __free_page(curr->page);
+        list_del(asgn2_device.mem_list.next);
+        if (NULL != curr) kmem_cache_free(asgn2_device.cache, curr);
+        asgn2_device.num_pages--;
+        asgn2_device.head.offset -= PAGE_SIZE;
+        asgn2_device.tail.offset -= PAGE_SIZE;
+        *f_pos -= PAGE_SIZE;
+      } else if (asgn2_device.head.offset == asgn2_device.tail.offset) {
+        asgn2_device.head.offset = 0;
+        asgn2_device.tail.offset = 0;
+        *f_pos = 0;
+      }
     }
   }
+  asgn2_device.data_size = asgn2_device.tail.offset - asgn2_device.head.offset;
   return size_read;
 }
 
@@ -304,7 +326,6 @@ void remove_from_cbuffer(unsigned long t_arg) {
     cbuf.count -= returned;
     cbuf.head = (cbuf.head + returned) % cbuf.capacity;
   } while (cbuf.count > 0);
-  //printk(KERN_WARNING "took %d bytes from the circular buffer\n", count);
 }
 
 DECLARE_TASKLET(t_name, remove_from_cbuffer, (unsigned long) &cbuf);
@@ -317,7 +338,7 @@ int add_to_cbuffer(char to_add) {
   //if (to_add == '\0') return 0;
   cbuf.buf[(cbuf.head + cbuf.count) % cbuf.capacity] = to_add;
   cbuf.count++;
-  if (to_add == '\0' || cbuf.count > 1000)
+  if (to_add == '\0' || cbuf.count > 2048)
     tasklet_schedule(&t_name);
   return 0;
 }
@@ -354,12 +375,15 @@ int asgn2_read_procmem(char *buf, char **start, off_t offset, int count,
 
   result = snprintf(buf, count,
 	            "major = %d\nnumber of pages = %d\ndata size = %u\n"
-                    "disk size = %d\nnprocs = %d\nmax_nprocs = %d\n",
+                    "disk size = %d\nnprocs = %d\nmax_nprocs = %d\n"
+                    "tail pos = %d\nhead pos = %d\n",
 	            asgn2_major, asgn2_device.num_pages, 
                     asgn2_device.data_size, 
                     (int)(asgn2_device.num_pages * PAGE_SIZE),
                     atomic_read(&asgn2_device.nprocs), 
-                    atomic_read(&asgn2_device.max_nprocs)); 
+                    atomic_read(&asgn2_device.max_nprocs),
+                    asgn2_device.tail.offset,
+                    asgn2_device.head.offset); 
   *eof = 1; /* end of file */
   return result;
 }
