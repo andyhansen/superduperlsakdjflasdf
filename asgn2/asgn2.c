@@ -39,6 +39,7 @@ MODULE_AUTHOR("Andy Hansen");
 MODULE_DESCRIPTION("COSC440 asgn2");
 
 
+int counter = 0;
 /**
  * The node structure for the memory page linked list.
  */ 
@@ -202,7 +203,7 @@ ssize_t asgn2_write(char* to_write, int count) {
   
   struct list_head *ptr = asgn2_device.mem_list.next;
   page_node *curr;
-  printk(KERN_WARNING "writing %d bytes\n", count);
+  //printk(KERN_WARNING "writing %d bytes\n", count);
 
   while (size_written < count) {
     curr = list_entry(ptr, page_node, list);
@@ -245,7 +246,6 @@ ssize_t asgn2_write(char* to_write, int count) {
       ptr = ptr->next;
     }
   }
-  printk(KERN_WARNING "Tail offset is %d\n", asgn2_device.tail.offset);
   asgn2_device.data_size = asgn2_device.tail.offset - asgn2_device.head.offset;
   return size_written;
 }
@@ -297,19 +297,12 @@ void remove_from_cbuffer(unsigned long t_arg) {
   int returned, count = 0;
   do {
     if (cbuf.head + cbuf.count < cbuf.capacity) count = cbuf.count;
-    else {
-      count = cbuf.capacity - cbuf.head;
-      printk(KERN_WARNING "buffer past the thing\n");
-      printk(KERN_WARNING "count in the cbuffer is %d\n", cbuf.count);
-      printk(KERN_WARNING "writing %d bytes from %d to %d\n", count,
-                                         cbuf.head, cbuf.head + count);
-      printk(KERN_WARNING "head is at %d\n", cbuf.head);
-      return; /*TODO: GET THIS WORKING WITHOUT BREAKING */
-    }
+    else count = cbuf.capacity - cbuf.head;
 
     returned = asgn2_write(&cbuf.buf[cbuf.head], count);
+    if (returned < count) printk(KERN_WARNING "The write didn't do it all\n");
     cbuf.count -= returned;
-    cbuf.head = cbuf.head + returned % cbuf.capacity;
+    cbuf.head = (cbuf.head + returned) % cbuf.capacity;
   } while (cbuf.count > 0);
   //printk(KERN_WARNING "took %d bytes from the circular buffer\n", count);
 }
@@ -321,9 +314,10 @@ int add_to_cbuffer(char to_add) {
   if (cbuf.capacity == cbuf.count) {
     return -ENOMEM;
   }
+  //if (to_add == '\0') return 0;
   cbuf.buf[(cbuf.head + cbuf.count) % cbuf.capacity] = to_add;
   cbuf.count++;
-  if (to_add == '\0' || cbuf.capacity == cbuf.count)
+  if (to_add == '\0' || cbuf.count > 1000)
     tasklet_schedule(&t_name);
   return 0;
 }
@@ -331,17 +325,14 @@ int add_to_cbuffer(char to_add) {
 void get_half_byte(void){
   u8 this_half_byte = read_half_byte();
   char full_byte;
-  //printk(KERN_WARNING "The half byte is %u\n", this_half_byte);
 
   if (second_half) {
     full_byte = (char) top_half_byte << 4 | this_half_byte;
-    //printk(KERN_WARNING "The byte is %c\n", full_byte);
     second_half = 0;
-    // add full byte to the circular buffer
-    add_to_cbuffer(full_byte);
-    //printk(KERN_WARNING "The byte is %c\n", remove_from_buffer());
+    /* Keep trying to add it to the buffer until it goes in */
+    while (0 > add_to_cbuffer(full_byte))
+      printk(KERN_WARNING "CBuffer is full, trying again\n");
   } else {
-    //printk(KERN_WARNING "read first half\n");
     top_half_byte = this_half_byte;
     second_half = 1;
   }
