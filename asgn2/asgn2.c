@@ -77,12 +77,16 @@ struct cbuf_t {
 
 asgn2_dev asgn2_device;
 
+atomic_t can_wake_up;
+
 int asgn2_major = 0;                      /* major number of module */  
 int asgn2_minor = 0;                      /* minor number of module */
 int asgn2_dev_count = 1;                  /* number of devices */
 
 u8 top_half_byte;
 int second_half = 0;
+
+DECLARE_WAIT_QUEUE_HEAD(wq);
 
 /**
  * This function frees all memory pages held by the module.
@@ -137,15 +141,17 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
   int begin_page_no = *f_pos / PAGE_SIZE; /* the first page which contains
 					     the requested data */
   int curr_page_no = 0;     /* the current page number */
-  int curr_del_page_no = 0;     /* the current page number */
   size_t curr_size_read;    /* size read from the virtual disk in this round */
   size_t size_to_be_read;   /* size to be read in the current round in 
 			       while loop */
 
   struct list_head *ptr = asgn2_device.mem_list.next;
-  struct list_head *tmp;
   page_node *curr;
+  char *last_char_read;
+  size_t original_count = count;
+  atomic_set(&can_wake_up, 0);
 
+restart:
   if (*f_pos >= asgn2_device.data_size) return 0;
   count = min(asgn2_device.data_size - (size_t)*f_pos, count);
 
@@ -178,31 +184,38 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
         asgn2_device.head.offset += curr_size_read;
         begin_offset += curr_size_read;
         size_to_be_read -= curr_size_read;
-        printk(KERN_WARNING "Curr size read %d\n", curr_size_read);
-        printk(KERN_WARNING "head pos %d\n", asgn2_device.head.offset);
       } while (curr_size_read > 0);
-      printk(KERN_WARNING "left the loop\n");
+      last_char_read = (page_address(curr->page) + asgn2_device.head.offset - 1);
+      //printk(KERN_WARNING "Last char read is: %c\n", *last_char_read);
+      //if (*last_char_read == '\0') printk(KERN_WARNING "LAST CHAR READ NOT NULL\n");
 
       curr_page_no++;
       ptr = ptr->next;
-      printk(KERN_WARNING "Head offset is now %d\n", asgn2_device.head.offset);
-      if (asgn2_device.head.offset % PAGE_SIZE == 1) {
-        //curr = list_entry(asgn2_device.mem_list.next, page_node, list);
+      if (asgn2_device.head.offset % PAGE_SIZE == 0) {
         if (NULL != curr->page) __free_page(curr->page);
         list_del(asgn2_device.mem_list.next);
         if (NULL != curr) kmem_cache_free(asgn2_device.cache, curr);
         asgn2_device.num_pages--;
-        asgn2_device.head.offset -= PAGE_SIZE;
+        //asgn2_device.head.offset -= PAGE_SIZE;
         asgn2_device.tail.offset -= PAGE_SIZE;
         *f_pos -= PAGE_SIZE;
       } else if (asgn2_device.head.offset == asgn2_device.tail.offset) {
         asgn2_device.head.offset = 0;
-        asgn2_device.tail.offset = 0;
+        //asgn2_device.tail.offset = 0;
         *f_pos = 0;
       }
     }
   }
   asgn2_device.data_size = asgn2_device.tail.offset - asgn2_device.head.offset;
+if (*last_char_read != '\0') {
+  printk(KERN_WARNING "Last char wasn't EOF, going to sleep\n");
+  wait_event_interruptible_exclusive(wq, atomic_read(&can_wake_up));
+  printk(KERN_WARNING "Woken up\n");
+  count = original_count - size_read;
+  ptr = asgn2_device.mem_list.next;
+  atomic_set(&can_wake_up, 1);
+  goto restart;
+}
   return size_read;
 }
 
@@ -226,6 +239,7 @@ ssize_t asgn2_write(char* to_write, int count) {
   struct list_head *ptr = asgn2_device.mem_list.next;
   page_node *curr;
   //printk(KERN_WARNING "writing %d bytes\n", count);
+  atomic_set(&can_wake_up, 1);
 
   while (size_written < count) {
     curr = list_entry(ptr, page_node, list);
@@ -269,6 +283,7 @@ ssize_t asgn2_write(char* to_write, int count) {
     }
   }
   asgn2_device.data_size = asgn2_device.tail.offset - asgn2_device.head.offset;
+  wake_up_interruptible_nr(&wq, 1);
   return size_written;
 }
 
@@ -335,7 +350,6 @@ int add_to_cbuffer(char to_add) {
   if (cbuf.capacity == cbuf.count) {
     return -ENOMEM;
   }
-  //if (to_add == '\0') return 0;
   cbuf.buf[(cbuf.head + cbuf.count) % cbuf.capacity] = to_add;
   cbuf.count++;
   if (to_add == '\0' || cbuf.count > 2048)
@@ -408,10 +422,11 @@ int __init asgn2_init_module(void){
   /* START TRIM */
   atomic_set(&asgn2_device.nprocs, 0);
   atomic_set(&asgn2_device.max_nprocs, 1);
+  atomic_set(&can_wake_up, 0);
   asgn2_device.head.page_no = 0;
-  asgn2_device.head.offset = 1;
+  asgn2_device.head.offset = 0;
   asgn2_device.tail.page_no = 0;
-  asgn2_device.tail.offset = 1;
+  asgn2_device.tail.offset = 0;
 
   result = alloc_chrdev_region(&asgn2_device.dev, asgn2_minor,
                                asgn2_dev_count, MYDEV_NAME);
