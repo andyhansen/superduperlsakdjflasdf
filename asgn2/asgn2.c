@@ -39,7 +39,6 @@ MODULE_AUTHOR("Andy Hansen");
 MODULE_DESCRIPTION("COSC440 asgn2");
 
 
-int counter = 0;
 /**
  * The node structure for the memory page linked list.
  */ 
@@ -47,6 +46,12 @@ typedef struct page_node_rec {
   struct list_head list;
   struct page *page;
 } page_node;
+
+typedef struct page_queue_rec {
+  struct list_head queue_list;
+  struct list_head page_list;
+  size_t data_size;
+} page_queue;
 
 struct index {
   int page_no;
@@ -57,6 +62,7 @@ typedef struct asgn1_dev_t {
   dev_t dev;            /* the device */
   struct cdev *cdev;
   struct list_head mem_list; 
+  struct list_head queue_list;
   int num_pages;        /* number of memory pages this module currently holds */
   size_t data_size;     /* total data size in this module */
   struct index head;
@@ -459,6 +465,8 @@ int __init asgn2_init_module(void){
   
   /* allocate pages */
   INIT_LIST_HEAD(&asgn2_device.mem_list);
+  INIT_LIST_HEAD(&asgn2_device.queue_list);
+  curr = 
   asgn2_device.num_pages = 0;
   asgn2_device.data_size = 0;
 
