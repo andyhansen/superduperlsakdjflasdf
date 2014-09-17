@@ -151,7 +151,7 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
   size_t original_count = count;
   atomic_set(&can_wake_up, 0);
 
-restart:
+//restart:
   if (*f_pos >= asgn2_device.data_size) return 0;
   count = min(asgn2_device.data_size - (size_t)*f_pos, count);
 
@@ -173,6 +173,9 @@ restart:
       begin_offset = *f_pos % PAGE_SIZE;
       size_to_be_read = (size_t)min((size_t)(count - size_read), 
 				    (size_t)(PAGE_SIZE - begin_offset));
+      /*for (i = begin_offset; i < min; i++) {
+        if (page_address
+      }*/
 
       do {
         curr_size_read = size_to_be_read - 
@@ -191,23 +194,23 @@ restart:
 
       curr_page_no++;
       ptr = ptr->next;
-      if (asgn2_device.head.offset % PAGE_SIZE == 0) {
+      /*if (asgn2_device.head.offset % PAGE_SIZE == 0) {
         if (NULL != curr->page) __free_page(curr->page);
         list_del(asgn2_device.mem_list.next);
         if (NULL != curr) kmem_cache_free(asgn2_device.cache, curr);
         asgn2_device.num_pages--;
-        //asgn2_device.head.offset -= PAGE_SIZE;
+        asgn2_device.head.offset -= PAGE_SIZE;
         asgn2_device.tail.offset -= PAGE_SIZE;
         *f_pos -= PAGE_SIZE;
       } else if (asgn2_device.head.offset == asgn2_device.tail.offset) {
         asgn2_device.head.offset = 0;
-        //asgn2_device.tail.offset = 0;
+        asgn2_device.tail.offset = 0;
         *f_pos = 0;
-      }
+      }*/
     }
   }
   asgn2_device.data_size = asgn2_device.tail.offset - asgn2_device.head.offset;
-if (*last_char_read != '\0') {
+/*if (*last_char_read != '\0') {
   printk(KERN_WARNING "Last char wasn't EOF, going to sleep\n");
   wait_event_interruptible_exclusive(wq, atomic_read(&can_wake_up));
   printk(KERN_WARNING "Woken up\n");
@@ -215,7 +218,7 @@ if (*last_char_read != '\0') {
   ptr = asgn2_device.mem_list.next;
   atomic_set(&can_wake_up, 1);
   goto restart;
-}
+}*/
   return size_read;
 }
 
