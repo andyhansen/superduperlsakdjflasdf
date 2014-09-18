@@ -56,21 +56,13 @@ typedef struct file_node_rec {
   int num_pages;
 } file_node;
 
-struct index {
-  int page_no;
-  int offset;
-};
-
 typedef struct asgn1_dev_t {
   dev_t dev;            /* the device */
   struct cdev *cdev;
-  struct list_head mem_list; 
   struct list_head file_list;
   int num_pages;        /* number of memory pages this module currently holds */
   int num_files;
   size_t data_size;     /* total data size in this module */
-  struct index head;
-  struct index tail;
   atomic_t nprocs;      /* number of processes accessing this device */ 
   atomic_t max_nprocs;  /* max number of processes accessing this device */
   struct kmem_cache *cache;      /* cache memory */
@@ -89,8 +81,6 @@ file_node *incomplete_file;
 
 asgn2_dev asgn2_device;
 
-atomic_t can_wake_up;
-
 int asgn2_major = 0;                      /* major number of module */  
 int asgn2_minor = 0;                      /* minor number of module */
 int asgn2_dev_count = 1;                  /* number of devices */
@@ -100,21 +90,6 @@ int second_half = 0;
 
 DECLARE_WAIT_QUEUE_HEAD(wq);
 
-/**
- * This function frees all memory pages held by the module.
- */
-void free_memory_pages(void) {
-  page_node *curr;
-
-  while (!list_empty(&asgn2_device.mem_list)) {
-    curr = list_entry(asgn2_device.mem_list.next, page_node, list);
-    if (NULL != curr->page) __free_page(curr->page);
-    list_del(asgn2_device.mem_list.next);
-    if (NULL != curr) kmem_cache_free(asgn2_device.cache, curr);
-  }
-  asgn2_device.data_size = 0;
-  asgn2_device.num_pages = 0;
-}
 
 file_node* allocate_empty_file_node(void) {
   file_node *node = kmalloc(sizeof(file_node), GFP_KERNEL);
@@ -142,6 +117,44 @@ void add_to_file_list(file_node *node) {
 }
 
 
+void free_file_node(file_node *node) {
+  page_node *curr;
+  if (node == NULL) return;
+  while (!list_empty(&node->plist)) {
+    curr = list_entry(node->plist.next, page_node, list);
+    if (NULL != curr->page) __free_page(curr->page);
+    list_del(node->plist.next);
+    if (NULL != curr) kmem_cache_free(asgn2_device.cache, curr);
+  }
+  kfree(node);
+}
+
+void free_file_nodes(void) {
+  /*TODO FINISH THIS SHIT */
+  file_node *node;
+
+  while (!list_empty(&asgn2_device.file_list)) {
+    node = list_entry(asgn2_device.file_list.next, file_node, flist);
+    free_file_node(node);
+    list_del(asgn2_device.file_list.next);
+  }
+  asgn2_device.data_size = 0;
+  asgn2_device.num_pages = 0;
+  asgn2_device.num_files = 0;
+}
+
+size_t get_data_size(void) {
+  file_node *node;
+  struct list_head *ptr;
+  size_t total = 0;
+
+  list_for_each(ptr, &asgn2_device.file_list) {
+    node = list_entry(ptr, file_node, flist);
+    total += node->data_size;
+  }
+  return total;
+}
+
 
 /**
  * This function opens the virtual disk, if it is opened in the write-only
@@ -153,14 +166,14 @@ int asgn2_open(struct inode *inode, struct file *filp) {
     return -EBUSY;
   }
   /* TODO: If numfiles is zero then go into the wait queue */
+  if (asgn2_device.num_files <= 0) 
+    wait_event_interruptible_exclusive(wq, asgn2_device.num_files);
   if (asgn2_device.num_files > 0) {
     node = remove_first_file();
-    if (node) printk(KERN_WARNING "Got us a node!!\n");
+    if (node == NULL) printk(KERN_WARNING "Something went very wrong\n");
+    filp->private_data = node;
   }
   atomic_inc(&asgn2_device.nprocs);
-  if ((filp->f_mode & FMODE_WRITE) && !(filp->f_mode & FMODE_READ)) {
-    free_memory_pages();
-  }
   return 0; /* success */
 }
 
@@ -170,6 +183,7 @@ int asgn2_open(struct inode *inode, struct file *filp) {
  */
 int asgn2_release (struct inode *inode, struct file *filp) {
   atomic_dec(&asgn2_device.nprocs);
+  free_file_node(filp->private_data);
   return 0;
 }
 
@@ -189,16 +203,27 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
   size_t size_to_be_read;   /* size to be read in the current round in 
 			       while loop */
 
-  struct list_head *ptr = asgn2_device.mem_list.next;
+  struct list_head *ptr;
   page_node *curr;
-  char *last_char_read;
+  file_node *node = filp->private_data;
+  if (node == NULL) {
+    printk(KERN_WARNING "private data is null\n");
+    //TODO RETURN AN ERROR
+    return 0;
+  }
+  ptr = node->plist.next;
+  if (ptr == NULL) {
+    printk(KERN_WARNING "pointer is null\n");
+    //TODO RETURN AN ERROR
+    return 0;
+  }
 
-  if (*f_pos >= asgn2_device.data_size) return 0;
-  count = min(asgn2_device.data_size - (size_t)*f_pos, count);
+  if (*f_pos >= node->data_size) return 0;
+  count = min(node->data_size - (size_t)*f_pos, count);
 
   while (size_read < count) {
     curr = list_entry(ptr, page_node, list);
-    if (ptr == &asgn2_device.mem_list) {
+    if (ptr == &node->plist) {
       /* We have already passed the end of the data area of the
          ramdisk, so we quit and return the size we have read
          so far */
@@ -222,7 +247,7 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
 		       size_to_be_read);
         size_read += curr_size_read;
         *f_pos += curr_size_read;
-        asgn2_device.head.offset += curr_size_read;
+        node->head += curr_size_read;
         begin_offset += curr_size_read;
         size_to_be_read -= curr_size_read;
       } while (curr_size_read > 0);
@@ -231,7 +256,8 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
       ptr = ptr->next;
     }
   }
-  asgn2_device.data_size = asgn2_device.tail.offset - asgn2_device.head.offset;
+  node->data_size = node->tail - node->head;
+  asgn2_device.data_size = get_data_size();
   return size_read;
 }
 
@@ -243,7 +269,7 @@ ssize_t asgn2_write(char* to_write, int count) {
   size_t size_written = 0;  /* size written to virtual disk in this function */
   size_t begin_offset;      /* the offset from the beginning of a page to
 			       start writing */
-  int begin_page_no = asgn2_device.tail.offset / PAGE_SIZE;  
+  int begin_page_no;
   /* the first page this finction
 					      should start writing to */
 
@@ -252,13 +278,12 @@ ssize_t asgn2_write(char* to_write, int count) {
   size_t size_to_be_written;  /* size to be read in the current round in
 				 while loop */
   
-  struct list_head *ptr = asgn2_device.mem_list.next;
+  struct list_head *ptr;
   page_node *curr;
   file_node *node = incomplete_file;
   ptr = node->plist.next;
   /* TODO: PUT IN CHECKS */
-
-  atomic_set(&can_wake_up, 1);
+  begin_page_no = node->tail / PAGE_SIZE;  
 
   while (size_written < count) {
     curr = list_entry(ptr, page_node, list);
@@ -304,10 +329,10 @@ ssize_t asgn2_write(char* to_write, int count) {
     printk(KERN_WARNING "LAST THING WAS NULL!!\n");
     add_to_file_list(node);
     incomplete_file = allocate_empty_file_node();
-
+    wake_up_interruptible_nr(&wq, 1);
   }
   node->data_size = node->tail - node->head;
-  printk(KERN_WARNING "WRITE SUCCESS\n");
+  asgn2_device.data_size = get_data_size();
   return size_written;
 }
 
@@ -412,15 +437,12 @@ int asgn2_read_procmem(char *buf, char **start, off_t offset, int count,
 
   result = snprintf(buf, count,
 	            "major = %d\nnumber of pages = %d\ndata size = %u\n"
-                    "disk size = %d\nnprocs = %d\nmax_nprocs = %d\n"
-                    "tail pos = %d\nhead pos = %d\n",
+                    "disk size = %d\nnprocs = %d\nmax_nprocs = %d\n",
 	            asgn2_major, asgn2_device.num_pages, 
                     asgn2_device.data_size, 
                     (int)(asgn2_device.num_pages * PAGE_SIZE),
                     atomic_read(&asgn2_device.nprocs), 
-                    atomic_read(&asgn2_device.max_nprocs),
-                    asgn2_device.tail.offset,
-                    asgn2_device.head.offset); 
+                    atomic_read(&asgn2_device.max_nprocs)); 
   *eof = 1; /* end of file */
   return result;
 }
@@ -436,42 +458,16 @@ struct file_operations asgn2_fops = {
 #define IRQ_NUMBER 7
 static int irq_number = IRQ_NUMBER;
 
-void try(void) {
-  file_node *node;
-  struct list_head *ptr;
-  page_node *curr;
-
-  printk(KERN_WARNING "\nstart try method any prints = bad\n");
-
-  node = list_entry(asgn2_device.file_list.next,
-                               file_node, flist);
-  if (node == NULL) printk(KERN_WARNING "Node didn't work\n");
-  ptr = node->plist.next;
-  if (ptr == NULL) printk(KERN_WARNING "PTR failure\n");
-  curr = list_entry(ptr, page_node, list);
-  if (curr == NULL) printk(KERN_WARNING "CURR IS NULL\n");
-
-  printk(KERN_WARNING "end try method\n\n");
-}
-
 /**
  * Initialise the module and create the master device
  */
 int __init asgn2_init_module(void){
   int result; 
-  int i;
-  char *test;
 
   /* START TRIM */
   atomic_set(&asgn2_device.nprocs, 0);
   atomic_set(&asgn2_device.max_nprocs, 1);
-  atomic_set(&can_wake_up, 0);
-  asgn2_device.head.page_no = 0;
-  asgn2_device.head.offset = 0;
-  asgn2_device.tail.page_no = 0;
-  asgn2_device.tail.offset = 0;
 
-  INIT_LIST_HEAD(&asgn2_device.mem_list);
   incomplete_file = allocate_empty_file_node();
 
   INIT_LIST_HEAD(&asgn2_device.file_list);
@@ -596,7 +592,7 @@ void __exit asgn2_exit_module(void){
   class_destroy(asgn2_device.class);
   printk(KERN_WARNING "cleaned up udev entry\n");
   
-  free_memory_pages();
+  free_file_nodes();
   kmem_cache_destroy(asgn2_device.cache);
   remove_proc_entry(MYDEV_NAME, NULL /* parent dir */);
   cdev_del(asgn2_device.cdev);
