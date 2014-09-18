@@ -20,7 +20,6 @@ __attribute__((section("__versions"))) = {
 	{ 0xda9e78e9, "module_layout" },
 	{ 0x37a0cba, "kfree" },
 	{ 0x4b8b420c, "device_destroy" },
-	{ 0xeed38436, "malloc_sizes" },
 	{ 0x7485e15e, "unregister_chrdev_region" },
 	{ 0x74738f6d, "cdev_del" },
 	{ 0x620805df, "remove_proc_entry" },
@@ -36,10 +35,12 @@ __attribute__((section("__versions"))) = {
 	{ 0xfaef0ed, "__tasklet_schedule" },
 	{ 0xff178f6, "__aeabi_idivmod" },
 	{ 0x30407f, "contig_page_data" },
-	{ 0xb9e52429, "__wake_up" },
 	{ 0x2da2b3ae, "__alloc_pages_nodemask" },
-	{ 0xd197d610, "kmem_cache_alloc" },
 	{ 0x99bb8806, "memmove" },
+	{ 0xeed38436, "malloc_sizes" },
+	{ 0xd197d610, "kmem_cache_alloc" },
+	{ 0x2875e14d, "kmem_cache_free" },
+	{ 0x969267bd, "__free_pages" },
 	{ 0xf20dabd8, "free_irq" },
 	{ 0x9dfdf722, "gpio_free_array" },
 	{ 0xd6b8e852, "request_threaded_irq" },
@@ -47,15 +48,8 @@ __attribute__((section("__versions"))) = {
 	{ 0x4ff229c7, "gpiochip_find" },
 	{ 0x2e5810c6, "__aeabi_unwind_cpp_pr1" },
 	{ 0xe2d5255a, "strcmp" },
-	{ 0xc8b57c27, "autoremove_wake_function" },
 	{ 0x7ec1c780, "mem_map" },
-	{ 0xc06ec2c8, "abort_exclusive_wait" },
-	{ 0x8893fa5d, "finish_wait" },
-	{ 0xb77a7c47, "prepare_to_wait_exclusive" },
-	{ 0x1000e51, "schedule" },
 	{ 0x67c2fa54, "__copy_to_user" },
-	{ 0x2875e14d, "kmem_cache_free" },
-	{ 0x969267bd, "__free_pages" },
 	{ 0xb81960ca, "snprintf" },
 	{ 0x27e1a049, "printk" },
 	{ 0x353e3fa5, "__get_user_4" },
@@ -68,4 +62,4 @@ __attribute__((section(".modinfo"))) =
 "depends=";
 
 
-MODULE_INFO(srcversion, "33ED5E896D9F61A3E1EC998");
+MODULE_INFO(srcversion, "365AE82B51ED08FE92ABFEA");

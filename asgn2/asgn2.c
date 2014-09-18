@@ -47,11 +47,14 @@ typedef struct page_node_rec {
   struct page *page;
 } page_node;
 
-typedef struct page_queue_rec {
-  struct list_head queue_list;
-  struct list_head page_list;
+typedef struct file_node_rec {
+  struct list_head flist;
+  struct list_head plist;
   size_t data_size;
-} page_queue;
+  int head;
+  int tail;
+  int num_pages;
+} file_node;
 
 struct index {
   int page_no;
@@ -62,8 +65,9 @@ typedef struct asgn1_dev_t {
   dev_t dev;            /* the device */
   struct cdev *cdev;
   struct list_head mem_list; 
-  struct list_head queue_list;
+  struct list_head file_list;
   int num_pages;        /* number of memory pages this module currently holds */
+  int num_files;
   size_t data_size;     /* total data size in this module */
   struct index head;
   struct index tail;
@@ -80,6 +84,8 @@ struct cbuf_t {
   int count;
   int capacity;
 } cbuf;
+
+file_node *incomplete_file;
 
 asgn2_dev asgn2_device;
 
@@ -110,14 +116,46 @@ void free_memory_pages(void) {
   asgn2_device.num_pages = 0;
 }
 
+file_node* allocate_empty_file_node(void) {
+  file_node *node = kmalloc(sizeof(file_node), GFP_KERNEL);
+  INIT_LIST_HEAD(&node->plist);
+  node->tail = 0;
+  node->head = 0;
+  node->data_size = 0;
+  node->num_pages = 0;
+  return node;
+}
+
+file_node* remove_first_file(void) {
+  file_node *node;
+  if (asgn2_device.num_files == 0) return NULL;
+  if (asgn2_device.file_list.next == NULL) return NULL;
+  node = list_entry(asgn2_device.file_list.next, file_node, flist);
+  list_del(asgn2_device.file_list.next);
+  asgn2_device.num_files--;
+  return node;
+}
+
+void add_to_file_list(file_node *node) {
+  list_add_tail(&(node->flist), &asgn2_device.file_list);
+  asgn2_device.num_files++;
+}
+
+
 
 /**
  * This function opens the virtual disk, if it is opened in the write-only
  * mode, all memory pages will be freed.
  */
 int asgn2_open(struct inode *inode, struct file *filp) {
+  file_node *node;
   if (atomic_read(&asgn2_device.nprocs) >= atomic_read(&asgn2_device.max_nprocs)) {
     return -EBUSY;
+  }
+  /* TODO: If numfiles is zero then go into the wait queue */
+  if (asgn2_device.num_files > 0) {
+    node = remove_first_file();
+    if (node) printk(KERN_WARNING "Got us a node!!\n");
   }
   atomic_inc(&asgn2_device.nprocs);
   if ((filp->f_mode & FMODE_WRITE) && !(filp->f_mode & FMODE_READ)) {
@@ -154,10 +192,7 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
   struct list_head *ptr = asgn2_device.mem_list.next;
   page_node *curr;
   char *last_char_read;
-  size_t original_count = count;
-  atomic_set(&can_wake_up, 0);
 
-//restart:
   if (*f_pos >= asgn2_device.data_size) return 0;
   count = min(asgn2_device.data_size - (size_t)*f_pos, count);
 
@@ -179,9 +214,6 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
       begin_offset = *f_pos % PAGE_SIZE;
       size_to_be_read = (size_t)min((size_t)(count - size_read), 
 				    (size_t)(PAGE_SIZE - begin_offset));
-      /*for (i = begin_offset; i < min; i++) {
-        if (page_address
-      }*/
 
       do {
         curr_size_read = size_to_be_read - 
@@ -194,37 +226,12 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
         begin_offset += curr_size_read;
         size_to_be_read -= curr_size_read;
       } while (curr_size_read > 0);
-      last_char_read = (page_address(curr->page) + asgn2_device.head.offset - 1);
-      //printk(KERN_WARNING "Last char read is: %c\n", *last_char_read);
-      //if (*last_char_read == '\0') printk(KERN_WARNING "LAST CHAR READ NOT NULL\n");
 
       curr_page_no++;
       ptr = ptr->next;
-      /*if (asgn2_device.head.offset % PAGE_SIZE == 0) {
-        if (NULL != curr->page) __free_page(curr->page);
-        list_del(asgn2_device.mem_list.next);
-        if (NULL != curr) kmem_cache_free(asgn2_device.cache, curr);
-        asgn2_device.num_pages--;
-        asgn2_device.head.offset -= PAGE_SIZE;
-        asgn2_device.tail.offset -= PAGE_SIZE;
-        *f_pos -= PAGE_SIZE;
-      } else if (asgn2_device.head.offset == asgn2_device.tail.offset) {
-        asgn2_device.head.offset = 0;
-        asgn2_device.tail.offset = 0;
-        *f_pos = 0;
-      }*/
     }
   }
   asgn2_device.data_size = asgn2_device.tail.offset - asgn2_device.head.offset;
-/*if (*last_char_read != '\0') {
-  printk(KERN_WARNING "Last char wasn't EOF, going to sleep\n");
-  wait_event_interruptible_exclusive(wq, atomic_read(&can_wake_up));
-  printk(KERN_WARNING "Woken up\n");
-  count = original_count - size_read;
-  ptr = asgn2_device.mem_list.next;
-  atomic_set(&can_wake_up, 1);
-  goto restart;
-}*/
   return size_read;
 }
 
@@ -247,28 +254,30 @@ ssize_t asgn2_write(char* to_write, int count) {
   
   struct list_head *ptr = asgn2_device.mem_list.next;
   page_node *curr;
-  //printk(KERN_WARNING "writing %d bytes\n", count);
+  file_node *node = incomplete_file;
+  ptr = node->plist.next;
+  /* TODO: PUT IN CHECKS */
+
   atomic_set(&can_wake_up, 1);
 
   while (size_written < count) {
     curr = list_entry(ptr, page_node, list);
-    if (ptr == &asgn2_device.mem_list) {
+    if (ptr == &node->plist) {
       /* not enough page, so add page */
       curr = kmem_cache_alloc(asgn2_device.cache, GFP_KERNEL);
       if (NULL == curr) {
-	printk(KERN_WARNING "Not enough memory left\n");
-	break;
+        printk(KERN_WARNING "Not enough memory left\n");
+        break;
       }
       curr->page = alloc_page(GFP_KERNEL);
       if (NULL == curr->page) {
-	printk(KERN_WARNING "Not enough memory left\n");
-        kmem_cache_free(asgn2_device.cache, curr);
-	break;
+        printk(KERN_WARNING "Not enough memory left\n");
+              kmem_cache_free(asgn2_device.cache, curr);
+        break;
       }
-      //INIT_LIST_HEAD(&curr->list);
-      list_add_tail(&(curr->list), &asgn2_device.mem_list);
-      asgn2_device.num_pages++;
-      ptr = asgn2_device.mem_list.prev;
+      list_add_tail(&(curr->list), &node->plist);
+      node->num_pages++;
+      ptr = node->plist.prev;
     } else if (curr_page_no < begin_page_no) {
       /* move on to the next page */
       ptr = ptr->next;
@@ -276,7 +285,7 @@ ssize_t asgn2_write(char* to_write, int count) {
     } else {
       do {
       /* this is the page to write to */
-        begin_offset = asgn2_device.tail.offset % PAGE_SIZE;
+        begin_offset = node->tail % PAGE_SIZE;
         size_to_be_written = (size_t)min((size_t)(count - size_written),
 				       (size_t)(PAGE_SIZE - begin_offset));
         curr_size_written = size_to_be_written;
@@ -284,15 +293,21 @@ ssize_t asgn2_write(char* to_write, int count) {
 	  	         to_write + size_written, size_to_be_written);
         size_written += curr_size_written;
         begin_offset += curr_size_written;
-        asgn2_device.tail.offset += curr_size_written;
+        node->tail += curr_size_written;
         size_to_be_written -= curr_size_written;
       } while (size_to_be_written > 0);
       curr_page_no++;
       ptr = ptr->next;
     }
   }
-  asgn2_device.data_size = asgn2_device.tail.offset - asgn2_device.head.offset;
-  wake_up_interruptible_nr(&wq, 1);
+  if (*(to_write + size_written - 1) == '\0') {
+    printk(KERN_WARNING "LAST THING WAS NULL!!\n");
+    add_to_file_list(node);
+    incomplete_file = allocate_empty_file_node();
+
+  }
+  node->data_size = node->tail - node->head;
+  printk(KERN_WARNING "WRITE SUCCESS\n");
   return size_written;
 }
 
@@ -374,8 +389,7 @@ void get_half_byte(void){
     full_byte = (char) top_half_byte << 4 | this_half_byte;
     second_half = 0;
     /* Keep trying to add it to the buffer until it goes in */
-    while (0 > add_to_cbuffer(full_byte))
-      printk(KERN_WARNING "CBuffer is full, trying again\n");
+    add_to_cbuffer(full_byte);
   } else {
     top_half_byte = this_half_byte;
     second_half = 1;
@@ -422,11 +436,31 @@ struct file_operations asgn2_fops = {
 #define IRQ_NUMBER 7
 static int irq_number = IRQ_NUMBER;
 
+void try(void) {
+  file_node *node;
+  struct list_head *ptr;
+  page_node *curr;
+
+  printk(KERN_WARNING "\nstart try method any prints = bad\n");
+
+  node = list_entry(asgn2_device.file_list.next,
+                               file_node, flist);
+  if (node == NULL) printk(KERN_WARNING "Node didn't work\n");
+  ptr = node->plist.next;
+  if (ptr == NULL) printk(KERN_WARNING "PTR failure\n");
+  curr = list_entry(ptr, page_node, list);
+  if (curr == NULL) printk(KERN_WARNING "CURR IS NULL\n");
+
+  printk(KERN_WARNING "end try method\n\n");
+}
+
 /**
  * Initialise the module and create the master device
  */
 int __init asgn2_init_module(void){
   int result; 
+  int i;
+  char *test;
 
   /* START TRIM */
   atomic_set(&asgn2_device.nprocs, 0);
@@ -436,6 +470,12 @@ int __init asgn2_init_module(void){
   asgn2_device.head.offset = 0;
   asgn2_device.tail.page_no = 0;
   asgn2_device.tail.offset = 0;
+
+  INIT_LIST_HEAD(&asgn2_device.mem_list);
+  incomplete_file = allocate_empty_file_node();
+
+  INIT_LIST_HEAD(&asgn2_device.file_list);
+
 
   result = alloc_chrdev_region(&asgn2_device.dev, asgn2_minor,
                                asgn2_dev_count, MYDEV_NAME);
@@ -463,11 +503,9 @@ int __init asgn2_init_module(void){
     goto fail_cdev;
   }
   
-  /* allocate pages */
-  INIT_LIST_HEAD(&asgn2_device.mem_list);
-  INIT_LIST_HEAD(&asgn2_device.queue_list);
-  curr = 
+
   asgn2_device.num_pages = 0;
+  asgn2_device.num_files = 0;
   asgn2_device.data_size = 0;
 
   if (NULL == create_proc_read_entry(MYDEV_NAME, 
@@ -525,9 +563,9 @@ int __init asgn2_init_module(void){
     result = -ENOMEM;
     goto fail_irq;
   }
-  
   printk(KERN_WARNING "set up udev entry\n");
   printk(KERN_WARNING "Hello world from %s\n", MYDEV_NAME);
+
   return 0;
 
   /* cleanup code called when any of the initialization steps fail */
