@@ -32,7 +32,7 @@ __attribute__((section("__versions"))) = {
 	{ 0x9d0d02cf, "cdev_alloc" },
 	{ 0x29537c9e, "alloc_chrdev_region" },
 	{ 0xfaef0ed, "__tasklet_schedule" },
-	{ 0xff178f6, "__aeabi_idivmod" },
+	{ 0xf7802486, "__aeabi_uidivmod" },
 	{ 0x30407f, "contig_page_data" },
 	{ 0xb9e52429, "__wake_up" },
 	{ 0x2da2b3ae, "__alloc_pages_nodemask" },
@@ -45,6 +45,8 @@ __attribute__((section("__versions"))) = {
 	{ 0x8893fa5d, "finish_wait" },
 	{ 0xb77a7c47, "prepare_to_wait_exclusive" },
 	{ 0x1000e51, "schedule" },
+	{ 0x62b72b0d, "mutex_unlock" },
+	{ 0x48a0f939, "mutex_lock_interruptible" },
 	{ 0xeed38436, "malloc_sizes" },
 	{ 0xd197d610, "kmem_cache_alloc" },
 	{ 0xf20dabd8, "free_irq" },
@@ -68,4 +70,4 @@ __attribute__((section(".modinfo"))) =
 "depends=";
 
 
-MODULE_INFO(srcversion, "95C10B15BE0B86082EC2D70");
+MODULE_INFO(srcversion, "702188E5A4FF47A30CBA749");

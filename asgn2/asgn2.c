@@ -2,7 +2,7 @@
  * File: asgn2.c
  * Date: 13/03/2011
  * Author: Andy Hansen
- * Version: 0.1
+ * Version: 0.2
  *
  * This is a module which serves as a virtual ramdisk which disk size is
  * limited by the amount of memory available and serves as the requirement for
@@ -61,10 +61,10 @@ typedef struct asgn1_dev_t {
   struct cdev *cdev;
   struct list_head file_list;
   int num_pages;        /* number of memory pages this module currently holds */
-  int num_files;
   size_t data_size;     /* total data size in this module */
   atomic_t nprocs;      /* number of processes accessing this device */ 
   atomic_t max_nprocs;  /* max number of processes accessing this device */
+  atomic_t num_files;
   struct kmem_cache *cache;      /* cache memory */
   struct class *class;     /* the udev class */
   struct device *device;   /* the udev device node */
@@ -72,9 +72,9 @@ typedef struct asgn1_dev_t {
 
 struct cbuf_t {
   char* buf;
-  int head;
-  int count;
-  int capacity;
+  size_t head;
+  size_t count;
+  size_t capacity;
 } cbuf;
 
 file_node *incomplete_file;
@@ -90,6 +90,8 @@ int second_half = 0;
 
 DECLARE_WAIT_QUEUE_HEAD(wq);
 
+DEFINE_MUTEX(file_list_mutex);
+
 
 file_node* allocate_empty_file_node(void) {
   file_node *node = kmalloc(sizeof(file_node), GFP_KERNEL);
@@ -102,18 +104,28 @@ file_node* allocate_empty_file_node(void) {
 }
 
 file_node* remove_first_file(void) {
-  file_node *node;
-  if (asgn2_device.num_files == 0) return NULL;
-  if (asgn2_device.file_list.next == NULL) return NULL;
+  file_node *node = NULL;
+  if (mutex_lock_interruptible(&file_list_mutex)) return NULL;
+  /* if there are no files to read, or the ptr is not correct then
+   * release the lock and return null */
+  if (atomic_read(&asgn2_device.num_files) == 0 ||
+      asgn2_device.file_list.next == NULL) {
+    mutex_unlock(&file_list_mutex);
+    return NULL;
+  }
   node = list_entry(asgn2_device.file_list.next, file_node, flist);
   list_del(asgn2_device.file_list.next);
-  asgn2_device.num_files--;
+  atomic_dec(&asgn2_device.num_files);
+  mutex_unlock(&file_list_mutex);
   return node;
 }
 
 void add_to_file_list(file_node *node) {
+  if (mutex_lock_interruptible(&file_list_mutex)) 
+    return;
   list_add_tail(&(node->flist), &asgn2_device.file_list);
-  asgn2_device.num_files++;
+  atomic_inc(&asgn2_device.num_files);
+  mutex_unlock(&file_list_mutex);
 }
 
 
@@ -126,6 +138,7 @@ void free_file_node(file_node *node) {
     list_del(node->plist.next);
     if (NULL != curr) kmem_cache_free(asgn2_device.cache, curr);
   }
+  asgn2_device.num_pages -= node->num_pages;
   kfree(node);
 }
 
@@ -140,21 +153,8 @@ void free_file_nodes(void) {
   }
   asgn2_device.data_size = 0;
   asgn2_device.num_pages = 0;
-  asgn2_device.num_files = 0;
+  atomic_set(&asgn2_device.num_files, 0);
 }
-
-size_t get_data_size(void) {
-  file_node *node;
-  struct list_head *ptr;
-  size_t total = 0;
-
-  list_for_each(ptr, &asgn2_device.file_list) {
-    node = list_entry(ptr, file_node, flist);
-    total += node->data_size;
-  }
-  return total;
-}
-
 
 /**
  * This function opens the virtual disk, if it is opened in the write-only
@@ -165,14 +165,16 @@ int asgn2_open(struct inode *inode, struct file *filp) {
   if (atomic_read(&asgn2_device.nprocs) >= atomic_read(&asgn2_device.max_nprocs)) {
     return -EBUSY;
   }
-  /* TODO: If numfiles is zero then go into the wait queue */
-  if (asgn2_device.num_files <= 0) 
-    wait_event_interruptible_exclusive(wq, asgn2_device.num_files);
-  if (asgn2_device.num_files > 0) {
-    node = remove_first_file();
-    if (node == NULL) printk(KERN_WARNING "Something went very wrong\n");
-    filp->private_data = node;
+  if (atomic_read(&asgn2_device.num_files) <= 0)
+    if (wait_event_interruptible_exclusive(wq, atomic_read(&asgn2_device.num_files)))
+      return -ERESTARTSYS;
+  /* put a lock here */
+  node = remove_first_file();
+  if (node == NULL) {
+    printk(KERN_WARNING "Couldn't get a page\n");
+    return -EBUSY;
   }
+  filp->private_data = node;
   atomic_inc(&asgn2_device.nprocs);
   return 0; /* success */
 }
@@ -256,8 +258,10 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
       ptr = ptr->next;
     }
   }
+  /* Get the new datasize my adding the new size minus the old size of what
+   * we just read */
+  asgn2_device.data_size += (node->tail - node->head) - node->data_size;
   node->data_size = node->tail - node->head;
-  asgn2_device.data_size = get_data_size();
   return size_read;
 }
 
@@ -282,7 +286,6 @@ ssize_t asgn2_write(char* to_write, int count) {
   page_node *curr;
   file_node *node = incomplete_file;
   ptr = node->plist.next;
-  /* TODO: PUT IN CHECKS */
   begin_page_no = node->tail / PAGE_SIZE;  
 
   while (size_written < count) {
@@ -302,6 +305,7 @@ ssize_t asgn2_write(char* to_write, int count) {
       }
       list_add_tail(&(curr->list), &node->plist);
       node->num_pages++;
+      asgn2_device.num_pages++;
       ptr = node->plist.prev;
     } else if (curr_page_no < begin_page_no) {
       /* move on to the next page */
@@ -326,13 +330,15 @@ ssize_t asgn2_write(char* to_write, int count) {
     }
   }
   if (*(to_write + size_written - 1) == '\0') {
-    printk(KERN_WARNING "LAST THING WAS NULL!!\n");
     add_to_file_list(node);
     incomplete_file = allocate_empty_file_node();
+    printk(KERN_WARNING "Waking up a reader\n");
     wake_up_interruptible_nr(&wq, 1);
   }
+  /* Get the new datasize my adding the new size minus the old size of what
+   * we just read */
+  asgn2_device.data_size += (node->tail - node->head) - node->data_size;
   node->data_size = node->tail - node->head;
-  asgn2_device.data_size = get_data_size();
   return size_written;
 }
 
@@ -501,7 +507,7 @@ int __init asgn2_init_module(void){
   
 
   asgn2_device.num_pages = 0;
-  asgn2_device.num_files = 0;
+  atomic_set(&asgn2_device.num_files, 0);
   asgn2_device.data_size = 0;
 
   if (NULL == create_proc_read_entry(MYDEV_NAME, 
