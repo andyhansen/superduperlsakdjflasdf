@@ -29,7 +29,7 @@
 #include <linux/proc_fs.h>
 #include <linux/device.h>
 #include <linux/sched.h>
-#include "gpio.c"
+#include "gpio.h"
 
 #define MYDEV_NAME "asgn2"
 #define MYIOC_TYPE 'k'
@@ -208,17 +208,12 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
   struct list_head *ptr;
   page_node *curr;
   file_node *node = filp->private_data;
-  if (node == NULL) {
-    printk(KERN_WARNING "private data is null\n");
-    //TODO RETURN AN ERROR
+  if (node == NULL || node->plist.next) {
+    /* In theory these two shouldn't occur, but just as a precaution */
+    printk(KERN_WARNING "File is corrupted, exiting now\n");
     return 0;
   }
   ptr = node->plist.next;
-  if (ptr == NULL) {
-    printk(KERN_WARNING "pointer is null\n");
-    //TODO RETURN AN ERROR
-    return 0;
-  }
 
   if (*f_pos >= node->data_size) return 0;
   count = min(node->data_size - (size_t)*f_pos, count);

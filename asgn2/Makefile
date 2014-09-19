@@ -2,7 +2,10 @@ MODULE_NAME = asgn2
 # EXTRA_CFLAGS += -Werror
 
 
-obj-m   := $(MODULE_NAME).o
+#obj-m   := $(MODULE_NAME).o gpio.o
+
+obj-m += $(MODULE_NAME).o
+$(MODULE_NAME)-objs = gpio.o asgn.o
 
 
 KDIR    := /lib/modules/$(shell uname -r)/build
