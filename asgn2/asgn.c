@@ -2,7 +2,7 @@
  * File: asgn2.c
  * Date: 13/03/2011
  * Author: Andy Hansen
- * Version: 0.2
+ * Version: 0.4
  *
  * This is a module which serves as a virtual ramdisk which disk size is
  * limited by the amount of memory available and serves as the requirement for
@@ -56,7 +56,7 @@ typedef struct file_node_rec {
   int num_pages;
 } file_node;
 
-typedef struct asgn1_dev_t {
+typedef struct asgn2_dev_t {
   dev_t dev;            /* the device */
   struct cdev *cdev;
   struct list_head file_list;
@@ -93,6 +93,7 @@ DECLARE_WAIT_QUEUE_HEAD(wq);
 DEFINE_MUTEX(file_list_mutex);
 
 
+/* Allocate a new empty file */
 file_node* allocate_empty_file_node(void) {
   file_node *node = kmalloc(sizeof(file_node), GFP_KERNEL);
   INIT_LIST_HEAD(&node->plist);
@@ -103,6 +104,7 @@ file_node* allocate_empty_file_node(void) {
   return node;
 }
 
+/* Remove the file at the front of the list */
 file_node* remove_first_file(void) {
   file_node *node = NULL;
   if (mutex_lock_interruptible(&file_list_mutex)) return NULL;
@@ -120,6 +122,9 @@ file_node* remove_first_file(void) {
   return node;
 }
 
+/*
+ * Adds the passed in file node to the end of the file node list 
+ */
 void add_to_file_list(file_node *node) {
   if (mutex_lock_interruptible(&file_list_mutex)) 
     return;
@@ -129,6 +134,9 @@ void add_to_file_list(file_node *node) {
 }
 
 
+/*
+ * Frees the passed in file node
+ */
 void free_file_node(file_node *node) {
   page_node *curr;
   if (node == NULL) return;
@@ -142,8 +150,11 @@ void free_file_node(file_node *node) {
   kfree(node);
 }
 
+/**
+ * Frees all of the file nodes resets the variables tracking
+ * the size of device and pages allocated.
+ */
 void free_file_nodes(void) {
-  /*TODO FINISH THIS SHIT */
   file_node *node;
 
   while (!list_empty(&asgn2_device.file_list)) {
@@ -162,18 +173,25 @@ void free_file_nodes(void) {
  */
 int asgn2_open(struct inode *inode, struct file *filp) {
   file_node *node;
-  if (atomic_read(&asgn2_device.nprocs) >= atomic_read(&asgn2_device.max_nprocs)) {
-    return -EBUSY;
+  if (filp->f_flags & O_WRONLY) {
+    printk(KERN_WARNING "%s: can't be opened for writing\n", MYDEV_NAME);
+    return -EINVAL;
   }
-  if (atomic_read(&asgn2_device.num_files) <= 0)
+  /* If there is already a reader operating, or there isn't a file for us to read 
+   * yet then go to sleep until we can read */
+  if (atomic_read(&asgn2_device.nprocs) >= atomic_read(&asgn2_device.max_nprocs)
+      ||atomic_read(&asgn2_device.num_files) <= 0)
     if (wait_event_interruptible_exclusive(wq, atomic_read(&asgn2_device.num_files)))
       return -ERESTARTSYS;
-  /* put a lock here */
+  /* Set the private data field of the file to be a
+   * pointer to the file from the queue, if we waited to get
+   * a file then return an error, though this shouldn't happen */
   node = remove_first_file();
   if (node == NULL) {
     printk(KERN_WARNING "Couldn't get a page\n");
     return -EBUSY;
   }
+  /* set the private data of this file to a unique file node */
   filp->private_data = node;
   atomic_inc(&asgn2_device.nprocs);
   return 0; /* success */
@@ -208,7 +226,7 @@ ssize_t asgn2_read(struct file *filp, char __user *buf, size_t count,
   struct list_head *ptr;
   page_node *curr;
   file_node *node = filp->private_data;
-  if (node == NULL || node->plist.next) {
+  if (node == NULL || node->plist.next == NULL) {
     /* In theory these two shouldn't occur, but just as a precaution */
     printk(KERN_WARNING "File is corrupted, exiting now\n");
     return 0;
@@ -279,6 +297,7 @@ ssize_t asgn2_write(char* to_write, int count) {
   
   struct list_head *ptr;
   page_node *curr;
+  /* Use the currrently unfinished file to store all the pages */
   file_node *node = incomplete_file;
   ptr = node->plist.next;
   begin_page_no = node->tail / PAGE_SIZE;  
@@ -313,6 +332,8 @@ ssize_t asgn2_write(char* to_write, int count) {
         size_to_be_written = (size_t)min((size_t)(count - size_written),
 				       (size_t)(PAGE_SIZE - begin_offset));
         curr_size_written = size_to_be_written;
+        /* it is assumed that memmove was successful, shouldn't be 
+         * in a situation where it can fail */
         memmove(page_address(curr->page) + begin_offset,
 	  	         to_write + size_written, size_to_be_written);
         size_written += curr_size_written;
@@ -324,10 +345,16 @@ ssize_t asgn2_write(char* to_write, int count) {
       ptr = ptr->next;
     }
   }
+  /* If the last character is a the null terminator then
+   * we have written the last part of this file. We then 
+   * decrement the tail by one so we don't include the null 
+   * terminator as part of the file then add it to the list
+   * of files */
   if (*(to_write + size_written - 1) == '\0') {
+    node->tail--;
     add_to_file_list(node);
     incomplete_file = allocate_empty_file_node();
-    printk(KERN_WARNING "Waking up a reader\n");
+    //printk(KERN_WARNING "Waking up a reader\n");
     wake_up_interruptible_nr(&wq, 1);
   }
   /* Get the new datasize my adding the new size minus the old size of what
@@ -402,7 +429,10 @@ int add_to_cbuffer(char to_add) {
   }
   cbuf.buf[(cbuf.head + cbuf.count) % cbuf.capacity] = to_add;
   cbuf.count++;
-  if (to_add == '\0' || cbuf.count > 2048)
+  /* if it's the last byte for that file or the buffer is 
+   * more than half full then schedule the tasklet which 
+   * writes to the file queue */
+  if (to_add == '\0' || cbuf.count > (cbuf.capacity/2))
     tasklet_schedule(&t_name);
   return 0;
 }
@@ -472,6 +502,9 @@ int __init asgn2_init_module(void){
   incomplete_file = allocate_empty_file_node();
 
   INIT_LIST_HEAD(&asgn2_device.file_list);
+  asgn2_device.num_pages = 0;
+  atomic_set(&asgn2_device.num_files, 0);
+  asgn2_device.data_size = 0;
 
 
   result = alloc_chrdev_region(&asgn2_device.dev, asgn2_minor,
@@ -499,11 +532,6 @@ int __init asgn2_init_module(void){
            MYDEV_NAME);
     goto fail_cdev;
   }
-  
-
-  asgn2_device.num_pages = 0;
-  atomic_set(&asgn2_device.num_files, 0);
-  asgn2_device.data_size = 0;
 
   if (NULL == create_proc_read_entry(MYDEV_NAME, 
 				     0, /* default mode */ 
@@ -512,7 +540,7 @@ int __init asgn2_init_module(void){
 				     NULL /* client data */)) {
     printk(KERN_WARNING "%s: can't create procfs entry\n", MYDEV_NAME);
     result = -ENOMEM;
-    goto fail_proc_entry;
+    goto fail_proc;
   }
 
   asgn2_device.cache = kmem_cache_create(MYDEV_NAME, sizeof(page_node), 
@@ -558,28 +586,41 @@ int __init asgn2_init_module(void){
   if (NULL == (cbuf.buf = kmalloc(sizeof(char) * cbuf.capacity, GFP_KERNEL))) {
     printk(KERN_WARNING "%s: Unable allocate cicular buffer memory\n", MYDEV_NAME);
     result = -ENOMEM;
-    goto fail_irq;
+    goto fail_buffer;
   }
-  printk(KERN_WARNING "set up udev entry\n");
+  //printk(KERN_WARNING "set up udev entry\n");
   printk(KERN_WARNING "Hello world from %s\n", MYDEV_NAME);
 
   return 0;
 
-  /* cleanup code called when any of the initialization steps fail */
-fail_device:
-   class_destroy(asgn2_device.class);
-fail_class:
-   kmem_cache_destroy(asgn2_device.cache);  
-fail_kmem_cache_create:
-  remove_proc_entry(MYDEV_NAME, NULL /* parent dir */);
-fail_proc_entry:
-  cdev_del(asgn2_device.cdev);
-fail_cdev:
-  unregister_chrdev_region(asgn2_device.dev, asgn2_dev_count);
-fail_gpio:
-  gpio_dummy_exit();
+/* cleanup code called when any of the initialization steps fail */
+fail_buffer:
+  /* don't need to free because the allocation failed */
 fail_irq:
   free_irq(irq_number, asgn2_device.device);
+fail_gpio:
+  gpio_dummy_exit();
+fail_device:
+  /* unregister device */
+  unregister_chrdev_region(asgn2_device.dev, asgn2_dev_count);
+fail_class:
+  class_destroy(asgn2_device.class);
+fail_kmem_cache_create:
+   kmem_cache_destroy(asgn2_device.cache);  
+fail_proc:
+  remove_proc_entry(MYDEV_NAME, NULL);
+fail_cdev:
+  /* de-register the device */
+  cdev_del(asgn2_device.cdev);
+
+/*fail_device:
+   class_destroy(asgn2_device.class);
+fail_class:
+fail_cdev:
+  cdev_del(asgn2_device.cdev);
+  unregister_chrdev_region(asgn2_device.dev, asgn2_dev_count);
+fail_proc_entry:
+  remove_proc_entry(MYDEV_NAME, NULL );*/
   
   return result;
 }
